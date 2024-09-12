@@ -217,8 +217,8 @@ class Optimizer:
             ).reshape(x.shape[0], 1, self.para_spline.cps.shape[0])
 
             basis_function_matrix = np.repeat(
-                np.tile(basis_function_matrix, [1, 2, 1]),repeats=2, axis=2
-                )
+                np.tile(basis_function_matrix, [1, 2, 1]), repeats=2, axis=2
+            )
             basis_function_matrix[:, 0, 1::2] = 0
             basis_function_matrix[:, 1, 0::2] = 0
             return basis_function_matrix
@@ -316,7 +316,8 @@ class Optimizer:
             field_mask=(
                 np.arange(0, np.prod(self.para_spline.cps.shape)).tolist()
                 + (
-                    np.array(self.macro_ctps) + np.prod(self.para_spline.cps.shape)
+                    np.array(self.macro_ctps)
+                    + np.prod(self.para_spline.cps.shape)
                 ).tolist()
             ),
         )
@@ -336,11 +337,11 @@ class Optimizer:
 
         # Something differs (or first iteration)
         self.para_spline.cps[:] = (
-            parameters[: np.prod(self.para_spline.cps.shape)].reshape(-1,2)
+            parameters[: np.prod(self.para_spline.cps.shape)].reshape(-1, 2)
             * inverse_scaling
         )
         self.macro_spline.cps.ravel()[self.macro_ctps] = (
-            parameters[np.prod(self.para_spline.cps.shape):]
+            parameters[np.prod(self.para_spline.cps.shape) :]
             + self.macro_spline_original.cps.ravel()[self.macro_ctps]
         )
         self.prepare_microstructure()

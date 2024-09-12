@@ -505,7 +505,7 @@ def main():
     # pygdjoints)
 
     # Geometry definition
-    tiling = [30, 12]
+    tiling = [8, 4]
     parameter_spline_degrees = [1, 1]
     parameter_spline_cps_dimensions = [15, 6]
     parameter_default_value = 0.16914405585511014 / 5  # For volume density 0.3

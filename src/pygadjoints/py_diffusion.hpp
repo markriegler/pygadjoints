@@ -243,7 +243,7 @@ public:
                 << function_basis.maxCwiseDegree() << "\n"
                 << std::endl;
 
-      boundary_conditions.print(std::cout, true);
+      // boundary_conditions.print(std::cout, true);
 
       std::cout << "Source Function  : " << source_function << std::endl;
     }

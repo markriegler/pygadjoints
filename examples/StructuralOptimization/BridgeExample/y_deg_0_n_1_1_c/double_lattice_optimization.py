@@ -538,7 +538,7 @@ def main():
     macro_ctps = [2, 3, 8, 9]
     scaling_factor_objective_function = 1 / 46898.43832478186
     scaling_factor_parameters = 5
-    scaling_factor_volume = 1 / 933 #1166.6666653306665
+    scaling_factor_volume = 1 / 933  # 1166.6666653306665
     n_refinemenets = 0
     volume_density = 0.4
 
