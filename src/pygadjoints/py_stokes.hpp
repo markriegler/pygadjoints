@@ -53,6 +53,8 @@ public:
   void ExportParaview(const std::string &fname, const bool &plot_elements,
                       const int &sample_rate, const bool &export_b64);
 
+  void ExportXML(const std::string &fname);
+
 private:
   real_t density_{1};
   real_t viscosity_{1};

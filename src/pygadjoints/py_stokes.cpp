@@ -17,6 +17,7 @@ void add_stokes_problem(py::module_ &m) {
            arg("viscosity"), arg("density"))
       .def("export_paraview", &stokes::ExportParaview, arg("fname"),
            arg("plot_elements"), arg("sample_rate"), arg("binary"))
+      .def("export_xml", &stokes::ExportXML, arg("fname"))
       .def("assemble", &stokes::Assemble)
       .def("solve_linear_system", &stokes::SolveLinearSystem)
 
@@ -157,13 +158,83 @@ void StokesProblem::Init(const std::string &filename,
   }
 }
 
-void StokesProblem::Assemble() { const Timer timer("Assemble"); }
+void StokesProblem::Assemble() {
+  const Timer timer("Assemble");
+
+  // Ensure that function spaces exist
+  if (!pVelocity_space and !pPressure_space) {
+    throw std::runtime_error(
+        "Velocity and pressure function spaces not found!");
+  }
+
+  // Auxiliary variables
+  const geometryMap &geoMap = *pGeometry_expression;
+  const space &vel_space = *pVelocity_space;
+  const space &p_space = *pPressure_space;
+  auto vel_divergence = idiv(vel_space, geoMap);
+  auto vel_gradient = ijac(vel_space, geoMap);
+
+  // Define system matrix
+  // Continuity equation: ∫ q(∇⋅v) dΩ
+  auto bilin_cont = p_space * vel_divergence.tr() * meas(geoMap);
+  // Momentum equation, velocity Laplacian: μ∫ ∇v : ∇w dΩ and μ∫ (∇vᵀ) : ∇w dΩ
+  auto bilin_mom_v =
+      viscosity_ * (vel_gradient % vel_gradient.tr()) * meas(geoMap);
+  auto bilin_mom_vt =
+      viscosity_ * (vel_gradient.cwisetr() % vel_gradient.tr()) * meas(geoMap);
+  // Momentum equation, pressure gradient: ∫ p(∇⋅w) dΩ
+  auto bilin_mom_p = -vel_divergence * p_space.tr() * meas(geoMap);
+
+  expr_assembler_pde.assemble(bilin_mom_v, bilin_mom_vt, bilin_mom_p,
+                              bilin_cont);
+
+  PrepareMatrixAndRhs();
+}
 
 void StokesProblem::ExportParaview(const std::string &fname,
                                    const bool &plot_elements,
                                    const int &sample_rate,
                                    const bool &export_b64) {
   Timer timer("Exporting Paraview");
+
+  // Generate Paraview File
+  gsParaviewCollection collection("ParaviewOutput/" + fname,
+                                  pExpr_evaluator.get());
+  collection.options().setSwitch("plotElements", plot_elements);
+  collection.options().setSwitch("base64", export_b64);
+  collection.options().setInt("plotElements.resolution", sample_rate);
+  collection.options().setInt("numPoints", sample_rate);
+  collection.newTimeStep(&mp_pde);
+  collection.addField(*pVelocity_solution, "velocity");
+  collection.addField(*pPressure_solution, "pressure");
+  // if (has_solution) {
+  //   auto solution_given = expr_assembler_pde.getCoeff(analytical_solution,
+  //                                                     *pGeometry_expression);
+  //   collection.addField(solution_given, "solution");
+  //   collection.addField(*pSolution_expression - solution_given, "error");
+  //   std::cout << "Error in L2 norm : "
+  //             << pExpr_evaluator->integral(
+  //                     (*pSolution_expression - solution_given) *
+  //                     (*pSolution_expression - solution_given))
+  //             << std::endl;
+  // }
+  collection.saveTimeStep();
+  collection.save();
 }
 
+void StokesProblem::ExportXML(const std::string &fname) {
+  Timer timer("Exporting XML");
+
+  gsFileData<> velocity_data, pressure_data;
+  gsMatrix<> velocity_solution, pressure_solution;
+
+  pVelocity_solution->extractFull(velocity_solution);
+  pPressure_solution->extractFull(pressure_solution);
+
+  velocity_data << velocity_solution;
+  pressure_data << pressure_solution;
+
+  velocity_data.save(fname + "_pressure.xml");
+  pressure_data.save(fname + "_velocity.xml");
+}
 } // namespace pygadjoints
