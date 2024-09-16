@@ -15,7 +15,8 @@ DENSITY = 1
 VISCOSITY = 1
 
 # Simulation parameters
-N_REFINEMENTS = 0
+N_REFINEMENTS = 2
+DEGREE_ELEVATIONS = 1
 
 
 if __name__ == "__main__":
@@ -96,12 +97,12 @@ if __name__ == "__main__":
     additional_blocks.add_boundary_conditions(
         block_id=2,
         dim=2,
-        function_list=["0", (f"y * (1-{BOX_HEIGHT})", "0")],
+        function_list=["0", (f"y * ({BOX_HEIGHT}-y)", "0")],
         bc_list=[
             ("BID2", "Dirichlet", 1),  # Inlet
             ("BID1", "Dirichlet", 0),  # Walls
         ],
-        unknown_id=0,
+        unknown_id=1,
         multipatch_id=0,
         comment=" Velocity boundary conditions: parabolic inflow field ",
     )
@@ -112,7 +113,7 @@ if __name__ == "__main__":
         dim=2,
         function_list=["0"],
         bc_list=[("BID3", "Dirichlet", 0)],
-        unknown_id=1,
+        unknown_id=0,
         multipatch_id=0,
         comment=" Pressure boundary conditions: fix outlet pressure to zero ",
     )
@@ -137,13 +138,13 @@ if __name__ == "__main__":
     stokes.init(
         fname=FILENAME,
         refinements=N_REFINEMENTS,
-        degree_elevations=0,
-        print_summary=False,
+        degree_elevations=DEGREE_ELEVATIONS,
+        print_summary=True,
     )
 
     # Forward simulation
     stokes.assemble()
-    # stokes.solve_linear_system()
+    stokes.solve_linear_system()
 
     # Write to ParaView file
     stokes.export_paraview(
