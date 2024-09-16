@@ -204,21 +204,21 @@ public:
     dimensionality_ = mp_pde.geoDim();
 
     // Set the discretization space
-    pBasis_function =
+    pFunction_space =
         std::make_shared<space>(expr_assembler_pde.getSpace(function_basis, 1));
 
     // Solution vector and solution variable
     pSolution_expression = std::make_shared<solution>(
-        expr_assembler_pde.getSolution(*pBasis_function, solVector));
+        expr_assembler_pde.getSolution(*pFunction_space, solVector));
 
     // Retrieve expression that represents the geometry mapping
     pGeometry_expression =
         std::make_shared<geometryMap>(expr_assembler_pde.getMap(mp_pde));
 
-    pBasis_function->setup(boundary_conditions, dirichlet::l2Projection, 0);
+    pFunction_space->setup(boundary_conditions, dirichlet::l2Projection, 0);
 
     // Assign a Dof Mapper
-    pDof_mapper = std::make_shared<gsDofMapper>(pBasis_function->mapper());
+    pDof_mapper = std::make_shared<gsDofMapper>(pFunction_space->mapper());
 
     // Evaluator
     pExpr_evaluator = std::make_shared<gsExprEvaluator<>>(
@@ -250,13 +250,13 @@ public:
 
   void Assemble() {
     const Timer timer("Assemble");
-    if (!pBasis_function) {
+    if (!pFunction_space) {
       throw std::runtime_error("Error");
     }
 
     // Auxiliary variables for readability
     const geometryMap &geometric_mapping = *pGeometry_expression;
-    const space &basis_function = *pBasis_function;
+    const space &basis_function = *pFunction_space;
 
     // Compute the system matrix and right-hand side
     auto bilin =
@@ -321,7 +321,7 @@ public:
     const Timer timer("ComputeVolumeDerivativeToCTPS");
 
     auto meas_expr = meas(*pGeometry_expression); // validated
-    const space &basis_function = *pBasis_function;
+    const space &basis_function = *pFunction_space;
     auto jacobian = jac(*pGeometry_expression); // validated
     auto inv_jacs = jacobian.ginv();            // validated
 
@@ -388,7 +388,7 @@ public:
 
     // Auxiliary references
     const geometryMap &geometric_mapping = *pGeometry_expression;
-    const space &basis_function = *pBasis_function;
+    const space &basis_function = *pFunction_space;
     const solution &solution_expression = *pSolution_expression;
     auto target_solution_expr =
         expr_assembler_pde.getCoeff(target_solution, geometric_mapping);
@@ -425,7 +425,7 @@ public:
   py::array_t<double> ComputeObjectiveFunctionDerivativeWrtCTPS() {
     const Timer timer("ComputeObjectiveFunctionDerivativeWrtCTPS");
     // Check if all required information is available
-    if (!(pGeometry_expression && pBasis_function && pSolution_expression &&
+    if (!(pGeometry_expression && pFunction_space && pSolution_expression &&
           pLagrange_multipliers)) {
       throw std::runtime_error(
           "Some of the required values are not yet initialized.");
@@ -438,7 +438,7 @@ public:
 
     // Auxiliary references
     const geometryMap &geometric_mapping = *pGeometry_expression;
-    const space &basis_function = *pBasis_function;
+    const space &basis_function = *pFunction_space;
     const solution &solution_expression = *pSolution_expression;
 
     ////////////////////////////////
@@ -674,7 +674,7 @@ private:
   std::shared_ptr<solution> pSolution_expression = nullptr;
 
   /// Expression that describes the last calculated solution
-  std::shared_ptr<space> pBasis_function = nullptr;
+  std::shared_ptr<space> pFunction_space = nullptr;
 
   /// Expression that describes the geometry's trial functions that are
   /// multi-dimensional

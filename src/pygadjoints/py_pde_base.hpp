@@ -38,7 +38,7 @@ protected:
   std::shared_ptr<solution> pSolution_expression = nullptr; // map
 
   /// Expression that describes the last calculated solution
-  std::shared_ptr<space> pBasis_function = nullptr; // map
+  std::shared_ptr<space> pFunction_space = nullptr; // map
 
   /// Expression that describes the last calculated solution
   std::shared_ptr<geometryMap> pGeometry_expression = nullptr;
@@ -113,6 +113,17 @@ public:
     omp_set_num_threads(n_threads);
   }
 #endif
+
+  void PrepareMatrixAndRhs() {
+    // Assign to matrix and vector
+    pSystem_matrix =
+        std::make_shared<const gsSparseMatrix<>>(expr_assembler_pde.matrix());
+    pSystem_rhs = std::make_shared<gsMatrix<>>(expr_assembler_pde.rhs());
+
+    // Clear for future evaluations
+    expr_assembler_pde.clearMatrix(true);
+    expr_assembler_pde.clearRhs();
+  }
 
   template <typename SolverType> void SolveLinearSystem() {
     const Timer timer("SolveLinearSystem");
