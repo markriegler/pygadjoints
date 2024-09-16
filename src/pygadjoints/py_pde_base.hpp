@@ -32,16 +32,16 @@ protected:
   gsMultiPatch<> mp_pde;
 
   /// Expression assembler related to the forward problem
-  std::shared_ptr<gsExprEvaluator<>> expr_evaluator_ptr;
+  std::shared_ptr<gsExprEvaluator<>> pExpr_evaluator;
 
   /// List of expression that describes the last calculated solution variables
-  std::shared_ptr<solution> solution_expression_ptr = nullptr; // map
+  std::shared_ptr<solution> pSolution_expression = nullptr; // map
 
   /// Expression that describes the last calculated solution
-  std::shared_ptr<space> basis_function_ptr = nullptr; // map
+  std::shared_ptr<space> pBasis_function = nullptr; // map
 
   /// Expression that describes the last calculated solution
-  std::shared_ptr<geometryMap> geometry_expression_ptr = nullptr;
+  std::shared_ptr<geometryMap> pGeometry_expression = nullptr;
 
   /// Global reference to solution vector
   gsMatrix<> solVector{};
@@ -65,19 +65,19 @@ protected:
   gsMultiBasis<> function_basis{}; // map
 
   // Linear System Matrix
-  std::shared_ptr<const gsSparseMatrix<>> system_matrix = nullptr;
+  std::shared_ptr<const gsSparseMatrix<>> pSystem_matrix = nullptr;
 
   // Linear System Matrix
-  std::shared_ptr<gsMatrix<>> ctps_sensitivities_matrix_ptr = nullptr;
+  std::shared_ptr<gsMatrix<>> pCtps_sensitivities_matrix = nullptr;
 
   // Linear System RHS
-  std::shared_ptr<gsMatrix<>> system_rhs = nullptr;
+  std::shared_ptr<gsMatrix<>> pSystem_rhs = nullptr;
 
   // Solution of the adjoint problem
-  std::shared_ptr<gsMatrix<>> lagrange_multipliers_ptr = nullptr; // map
+  std::shared_ptr<gsMatrix<>> pLagrange_multipliers = nullptr; // map
 
   // DOF-Mapper
-  std::shared_ptr<gsDofMapper> dof_mapper_ptr = nullptr;
+  std::shared_ptr<gsDofMapper> pDof_mapper = nullptr;
 
   // Number of refinements in the current iteration
   int n_refinements{};
@@ -120,39 +120,39 @@ public:
     ///////////////////
     // Linear Solver //
     ///////////////////
-    if ((!system_matrix) || (!system_rhs)) {
+    if ((!pSystem_matrix) || (!pSystem_rhs)) {
       gsWarn << "System matrix and system rhs are required for solving!"
              << std::endl;
       return;
     }
     // Initialize linear solver
     SolverType solver;
-    solver.compute(*system_matrix);
-    solVector = solver.solve(*system_rhs);
+    solver.compute(*pSystem_matrix);
+    solVector = solver.solve(*pSystem_rhs);
   }
 
   double ComputeVolume() {
     const Timer timer("ComputeVolume");
 
     // Compute volume of domain
-    if (!expr_evaluator_ptr) {
+    if (!pExpr_evaluator) {
       GISMO_ERROR("ExprEvaluator not initialized");
     }
-    return expr_evaluator_ptr->integral(meas(*geometry_expression_ptr));
+    return pExpr_evaluator->integral(meas(*pGeometry_expression));
   }
 
   py::array_t<double> GetParameterSensitivities() {
-    if (!ctps_sensitivities_matrix_ptr) {
+    if (!pCtps_sensitivities_matrix) {
       throw std::runtime_error("CTPS Matrix has not been computed yet.");
     }
 
-    const int _rows = ctps_sensitivities_matrix_ptr->rows();
-    const int _cols = ctps_sensitivities_matrix_ptr->cols();
+    const int _rows = pCtps_sensitivities_matrix->rows();
+    const int _cols = pCtps_sensitivities_matrix->cols();
     py::array_t<double> matrix(_rows * _cols);
     double *matrix_ptr = static_cast<double *>(matrix.request().ptr);
     for (int i{}; i < _rows; i++) {
       for (int j{}; j < _cols; j++) {
-        matrix_ptr[i * _cols + j] = (*ctps_sensitivities_matrix_ptr)(i, j);
+        matrix_ptr[i * _cols + j] = (*pCtps_sensitivities_matrix)(i, j);
       }
     }
     matrix.resize({_rows, _cols});
@@ -200,7 +200,7 @@ public:
             mp_new.patch(patch_id).coefs().at(i_coef);
       }
     }
-    // geometry_expression_ptr->copyCoefs(mp_new);
+    // pGeometry_expression->copyCoefs(mp_new);
   }
 };
 

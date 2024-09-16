@@ -65,22 +65,22 @@ public:
     Timer timer("Exporting Paraview");
     // Generate Paraview File
     gsParaviewCollection collection("ParaviewOutput/" + fname,
-                                    expr_evaluator_ptr.get());
+                                    pExpr_evaluator.get());
     collection.options().setSwitch("plotElements", plot_elements);
     collection.options().setSwitch("base64", export_b64);
     collection.options().setInt("plotElements.resolution", sample_rate);
     collection.options().setInt("numPoints", sample_rate);
     collection.newTimeStep(&mp_pde);
-    collection.addField(*solution_expression_ptr, "displacement");
+    collection.addField(*pSolution_expression, "displacement");
     if (has_solution) {
-      auto solution_given = expr_assembler_pde.getCoeff(
-          analytical_solution, *geometry_expression_ptr);
+      auto solution_given = expr_assembler_pde.getCoeff(analytical_solution,
+                                                        *pGeometry_expression);
       collection.addField(solution_given, "solution");
-      collection.addField(*solution_expression_ptr - solution_given, "error");
+      collection.addField(*pSolution_expression - solution_given, "error");
       std::cout << "Error in L2 norm : "
-                << expr_evaluator_ptr->integral(
-                       (*solution_expression_ptr - solution_given) *
-                       (*solution_expression_ptr - solution_given))
+                << pExpr_evaluator->integral(
+                       (*pSolution_expression - solution_given) *
+                       (*pSolution_expression - solution_given))
                 << std::endl;
     }
     collection.saveTimeStep();
@@ -98,7 +98,7 @@ public:
     // Generate Paraview File
     gsMultiPatch<> mpsol;
     gsFileData<> output;
-    solution_expression_ptr->extract(mpsol);
+    pSolution_expression->extract(mpsol);
     output << mpsol;
     output.save(fname + ".xml");
   }
@@ -116,7 +116,7 @@ public:
     gsMatrix<> full_solution;
     gsFileData<> output;
     output << solVector;
-    solution_expression_ptr->extractFull(full_solution);
+    pSolution_expression->extractFull(full_solution);
     output << full_solution;
     output.save(fname + ".xml");
     return timer.stop();
@@ -189,25 +189,24 @@ public:
     dimensionality_ = mp_pde.geoDim();
 
     // Set the discretization space
-    basis_function_ptr = std::make_shared<space>(
+    pBasis_function = std::make_shared<space>(
         expr_assembler_pde.getSpace(function_basis, dimensionality_));
 
     // Solution vector and solution variable
-    solution_expression_ptr = std::make_shared<solution>(
-        expr_assembler_pde.getSolution(*basis_function_ptr, solVector));
+    pSolution_expression = std::make_shared<solution>(
+        expr_assembler_pde.getSolution(*pBasis_function, solVector));
 
     // Retrieve expression that represents the geometry mapping
-    geometry_expression_ptr =
+    pGeometry_expression =
         std::make_shared<geometryMap>(expr_assembler_pde.getMap(mp_pde));
 
-    basis_function_ptr->setup(boundary_conditions, dirichlet::l2Projection, 0);
+    pBasis_function->setup(boundary_conditions, dirichlet::l2Projection, 0);
 
     // Assign a Dof Mapper
-    dof_mapper_ptr =
-        std::make_shared<gsDofMapper>(basis_function_ptr->mapper());
+    pDof_mapper = std::make_shared<gsDofMapper>(pBasis_function->mapper());
 
     // Evaluator
-    expr_evaluator_ptr = std::make_shared<gsExprEvaluator<>>(
+    pExpr_evaluator = std::make_shared<gsExprEvaluator<>>(
         gsExprEvaluator<>(expr_assembler_pde));
 
     // Initialize the system
@@ -236,13 +235,13 @@ public:
 
   void Assemble() {
     const Timer timer("Assemble");
-    if (!basis_function_ptr) {
+    if (!pBasis_function) {
       throw std::runtime_error("Error");
     }
 
     // Auxiliary variables for readability
-    const geometryMap &geometric_mapping = *geometry_expression_ptr;
-    const space &basis_function = *basis_function_ptr;
+    const geometryMap &geometric_mapping = *pGeometry_expression;
+    const space &basis_function = *pBasis_function;
 
     // Compute the system matrix and right-hand side
     auto phys_jacobian = ijac(basis_function, geometric_mapping);
@@ -275,9 +274,9 @@ public:
                                    basis_function * g_N *
                                        nv(geometric_mapping).norm());
 
-    system_matrix =
+    pSystem_matrix =
         std::make_shared<const gsSparseMatrix<>>(expr_assembler_pde.matrix());
-    system_rhs = std::make_shared<gsMatrix<>>(expr_assembler_pde.rhs());
+    pSystem_rhs = std::make_shared<gsMatrix<>>(expr_assembler_pde.rhs());
 
     // Clear for future evaluations
     expr_assembler_pde.clearMatrix(true);
@@ -288,18 +287,18 @@ public:
 
   double ComputeObjectiveFunction() {
     const Timer timer("ComputeObjectiveFunction");
-    if (!geometry_expression_ptr) {
+    if (!pGeometry_expression) {
       throw std::runtime_error("Error no geometry expression found.");
     }
 
     // Auxiliary
-    solution &solution_expression = *solution_expression_ptr;
+    solution &solution_expression = *pSolution_expression;
     if (objective_function_ == ObjectiveFunction::compliance) {
       // F^{T} u
-      return (system_rhs->transpose() * solVector)(0, 0);
+      return (pSystem_rhs->transpose() * solVector)(0, 0);
     } else {
       assert((objective_function_ == ObjectiveFunction::displacement_norm));
-      const geometryMap &geometric_mapping = *geometry_expression_ptr;
+      const geometryMap &geometric_mapping = *pGeometry_expression;
 
       // Integrate the compliance
       gsExprEvaluator<> expr_evaluator(expr_assembler_pde);
@@ -316,10 +315,10 @@ public:
     const Timer timer("ComputeVolumeDerivativeToCTPS");
     // Compute the derivative of the volume of the domain with respect to
     // the control points Auxiliary expressions
-    const space &basis_function = *basis_function_ptr;
-    auto jacobian = jac(*geometry_expression_ptr);      // validated
+    const space &basis_function = *pBasis_function;
+    auto jacobian = jac(*pGeometry_expression);         // validated
     auto inv_jacs = jacobian.ginv();                    // validated
-    auto meas_expr = meas(*geometry_expression_ptr);    // validated
+    auto meas_expr = meas(*pGeometry_expression);       // validated
     auto djacdc = jac(basis_function);                  // validated
     auto aux_expr = (djacdc * inv_jacs).tr();           // validated
     auto meas_expr_dx = meas_expr * (aux_expr).trace(); // validated
@@ -339,14 +338,14 @@ public:
     const Timer timer("SolveAdjointProblem");
     if (objective_function_ == ObjectiveFunction::compliance) {
       // - u
-      lagrange_multipliers_ptr = std::make_shared<gsMatrix<>>(-solVector);
+      pLagrange_multipliers = std::make_shared<gsMatrix<>>(-solVector);
     } else {
       assert((objective_function_ == ObjectiveFunction::displacement_norm));
 
       // Auxiliary references
-      const geometryMap &geometric_mapping = *geometry_expression_ptr;
-      const space &basis_function = *basis_function_ptr;
-      const solution &solution_expression = *solution_expression_ptr;
+      const geometryMap &geometric_mapping = *pGeometry_expression;
+      const space &basis_function = *pBasis_function;
+      const solution &solution_expression = *pSolution_expression;
 
       //////////////////////////////////////
       // Derivative of Objective Function //
@@ -363,14 +362,14 @@ public:
       // Solving the adjoint problem //
       /////////////////////////////////
       const gsSparseMatrix<> matrix_in_initial_configuration(
-          system_matrix->transpose().eval());
+          pSystem_matrix->transpose().eval());
       auto rhs_vector = expr_assembler_pde.rhs();
 
       // Initialize linear solver
       SolverType solverAdjoint;
       solverAdjoint.compute(matrix_in_initial_configuration);
       // solve adjoint function
-      lagrange_multipliers_ptr = std::make_shared<gsMatrix<>>(
+      pLagrange_multipliers = std::make_shared<gsMatrix<>>(
           -solverAdjoint.solve(expr_assembler_pde.rhs()));
       expr_assembler_pde.clearMatrix(true);
       expr_assembler_pde.clearRhs();
@@ -380,20 +379,20 @@ public:
   py::array_t<double> ComputeObjectiveFunctionDerivativeWrtCTPS() {
     const Timer timer("ComputeObjectiveFunctionDerivativeWrtCTPS");
     // Check if all required information is available
-    if (!(geometry_expression_ptr && basis_function_ptr &&
-          solution_expression_ptr && lagrange_multipliers_ptr)) {
+    if (!(pGeometry_expression && pBasis_function && pSolution_expression &&
+          pLagrange_multipliers)) {
       throw std::runtime_error(
           "Some of the required values are not yet initialized.");
     }
 
-    if (!(ctps_sensitivities_matrix_ptr)) {
+    if (!(pCtps_sensitivities_matrix)) {
       throw std::runtime_error("CTPS Matrix has not been computed yet.");
     }
 
     // Auxiliary references
-    const geometryMap &geometric_mapping = *geometry_expression_ptr;
-    const space &basis_function = *basis_function_ptr;
-    const solution &solution_expression = *solution_expression_ptr;
+    const geometryMap &geometric_mapping = *pGeometry_expression;
+    const space &basis_function = *pBasis_function;
+    const solution &solution_expression = *pSolution_expression;
 
     ////////////////////////////////
     // Derivative of the LHS Form //
@@ -496,7 +495,7 @@ public:
     // Assumes expr_assembler_pde.rhs() returns 0 when nothing is assembled
     const auto sensitivities_wrt_ctps =
         (expr_assembler_pde.rhs().transpose() +
-         (lagrange_multipliers_ptr->transpose() * expr_assembler_pde.matrix()));
+         (pLagrange_multipliers->transpose() * expr_assembler_pde.matrix()));
 
     // Write eigen matrix into a py::array
     py::array_t<double> sensitivities_py(sensitivities_wrt_ctps.size());
@@ -534,18 +533,18 @@ public:
     }
 
     // Start the assignment
-    if (!dof_mapper_ptr) {
+    if (!pDof_mapper) {
       throw std::runtime_error("System has not been initialized");
     }
 
     // Start the assignment
-    const size_t totalSz = dof_mapper_ptr->freeSize();
-    if (!ctps_sensitivities_matrix_ptr) {
-      ctps_sensitivities_matrix_ptr = std::make_shared<gsMatrix<>>();
-      ctps_sensitivities_matrix_ptr->resize(totalSz, design_dimension);
+    const size_t totalSz = pDof_mapper->freeSize();
+    if (!pCtps_sensitivities_matrix) {
+      pCtps_sensitivities_matrix = std::make_shared<gsMatrix<>>();
+      pCtps_sensitivities_matrix->resize(totalSz, design_dimension);
     }
     // Reinit to zero
-    (*ctps_sensitivities_matrix_ptr) *= 0.;
+    (*pCtps_sensitivities_matrix) *= 0.;
 
     // Rough overestimate to avoid realloations
     for (int patch_support{}; patch_support < patch_supports.rows();
@@ -554,14 +553,14 @@ public:
       const int i_design = patch_supports(patch_support, 1);
       const int k_index_offset = patch_supports(patch_support, 2);
       for (index_t k_dim = 0; k_dim != dimensionality_; k_dim++) {
-        for (size_t l_dof = 0;
-             l_dof != dof_mapper_ptr->patchSize(j_patch, k_dim); l_dof++) {
-          if (dof_mapper_ptr->is_free(l_dof, j_patch, k_dim)) {
-            const int global_id = dof_mapper_ptr->index(l_dof, j_patch, k_dim);
+        for (size_t l_dof = 0; l_dof != pDof_mapper->patchSize(j_patch, k_dim);
+             l_dof++) {
+          if (pDof_mapper->is_free(l_dof, j_patch, k_dim)) {
+            const int global_id = pDof_mapper->index(l_dof, j_patch, k_dim);
             if (global_id >= totalSz || i_design >= design_dimension) {
               throw std::runtime_error("Dof Mapper is not working properly.");
             }
-            ctps_sensitivities_matrix_ptr->operator()(global_id, i_design) =
+            pCtps_sensitivities_matrix->operator()(global_id, i_design) =
                 static_cast<double>(mp.patch(j_patch).coef(
                     l_dof, k_dim + k_index_offset * dimensionality_));
           }
