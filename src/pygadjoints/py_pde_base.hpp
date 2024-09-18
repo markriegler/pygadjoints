@@ -170,7 +170,8 @@ public:
     return matrix;
   }
 
-  void UpdateGeometry(const std::string &fname, const bool &topology_changes) {
+  void UpdateGeometry(const std::string &fname,
+                         const bool &topology_changes) {
     const Timer timer("UpdateGeometry");
     if (topology_changes) {
       throw std::runtime_error("Not Implemented!");
@@ -184,29 +185,33 @@ public:
 
     // This update does not require refinement or elevation, in theory the mp is
     // not touched, only the solution field
+    size_t n_patches_new, n_patches_old;
+    n_patches_new = mp_new.nPatches();
+    n_patches_old = mp_pde.nPatches();
 
     // Ignore all other information!
-    if (mp_new.nPatches() != mp_pde.nPatches()) {
+    if (n_patches_new != n_patches_old) {
       throw std::runtime_error(
           "This does not work - I am fucked. Expected number of "
           "patches " +
-          std::to_string(mp_pde.nPatches()) + ", but got " +
-          std::to_string(mp_new.nPatches()));
+          std::to_string(n_patches_old) + ", but got " +
+          std::to_string(n_patches_new));
     }
     // Manually update coefficients as to not overwrite any precomputed
     // values
-    for (size_t patch_id{}; patch_id < mp_new.nPatches(); patch_id++) {
-      if (mp_new.patch(patch_id).coefs().size() !=
-          mp_pde.patch(patch_id).coefs().size()) {
+    size_t n_new_coefs, n_old_coefs;
+
+    for (size_t patch_id{}; patch_id < n_patches_new; patch_id++) {
+      n_new_coefs = mp_new.patch(patch_id).coefs().size();
+      n_old_coefs = mp_pde.patch(patch_id).coefs().size();
+      if (n_new_coefs != n_old_coefs) {
         throw std::runtime_error(
             "This does not work - I am fucked. Expected number of "
             "coefficients " +
-            std::to_string(mp_pde.patch(patch_id).coefs().size()) +
-            ", but got " +
-            std::to_string(mp_new.patch(patch_id).coefs().size()));
+            std::to_string(n_old_coefs) + ", but got " +
+            std::to_string(n_new_coefs));
       }
-      for (int i_coef = 0; i_coef != mp_pde.patch(patch_id).coefs().size();
-           i_coef++) {
+      for (size_t i_coef = 0; i_coef != n_old_coefs; i_coef++) {
         mp_pde.patch(patch_id).coefs().at(i_coef) =
             mp_new.patch(patch_id).coefs().at(i_coef);
       }

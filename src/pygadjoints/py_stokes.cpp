@@ -20,6 +20,12 @@ void add_stokes_problem(py::module_ &m) {
       .def("export_xml", &stokes::ExportXML, arg("fname"))
       .def("assemble", &stokes::Assemble)
       .def("solve_linear_system", &stokes::SolveLinearSystem)
+      .def("update_geometry", &stokes::UpdateGeometry, arg("fname"),
+           arg("topology_changes"))
+      .def("set_objective_function", &stokes::SetObjectiveFunction,
+           arg("objective_function"))
+      .def("compute_objective_function_value",
+           &stokes::ComputeObjectiveFunctionValue)
 
 // OpenMP specifics
 #ifdef PYGADJOINTS_USE_OPENMP
@@ -189,6 +195,42 @@ void StokesProblem::Assemble() {
                               bilin_cont);
 
   PrepareMatrixAndRhs();
+}
+
+void StokesProblem::SetObjectiveFunction(
+    const int objective_function_selector) {
+  if (objective_function_selector == 1) {
+    objective_function_ = ObjectiveFunction::viscous_dissipation;
+  } else {
+    throw std::runtime_error("Objective function not known!");
+  }
+}
+
+double StokesProblem::ComputeObjectiveFunctionValue() {
+  const Timer timer("ComputeObjectiveFunction");
+
+  if (!pGeometry_expression) {
+    throw std::runtime_error("Error no geometry expression found.");
+  }
+
+  // Auxiliary variables
+  solution &velocity_solution = *pVelocity_solution;
+  solution &pressure_solution = *pPressure_solution;
+  const geometryMap &geoMap = *pGeometry_expression;
+  gsExprEvaluator<> expression_evaluator(expr_assembler_pde);
+  real_t objective_value;
+
+  if (objective_function_ == ObjectiveFunction::viscous_dissipation) {
+    auto vel_gradient = igrad(velocity_solution, geoMap);
+    auto strain_tensor = 0.5 * (vel_gradient + vel_gradient.cwisetr());
+    objective_value = expression_evaluator.integral(
+      -1.0 * viscosity_ * strain_tensor * strain_tensor.tr() * meas(geoMap)
+    );
+  } else {
+    throw std::runtime_error("Objective function not known!");
+  }
+
+  return objective_value;
 }
 
 void StokesProblem::ExportParaview(const std::string &fname,

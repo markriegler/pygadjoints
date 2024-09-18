@@ -6,6 +6,11 @@ using namespace gismo;
 
 namespace py = pybind11;
 
+enum class ObjectiveFunction : int {
+  // Maximize ∫ ε(v) : ε(v) dΩ = 0.5⋅∫ ∇v : (∇v+(∇v)ᵀ) dΩ
+  viscous_dissipation = 1
+};
+
 class StokesProblem : public PdeProblem {
 private:
   using SolverType = gsSparseSolver<>::LU;
@@ -53,6 +58,10 @@ public:
   void ExportParaview(const std::string &fname, const bool &plot_elements,
                       const int &sample_rate, const bool &export_b64);
 
+  void SetObjectiveFunction(const int objective_function_selector);
+
+  double ComputeObjectiveFunctionValue();
+
   void ExportXML(const std::string &fname);
 
 private:
@@ -78,6 +87,9 @@ private:
   // Partial solution values/expression for the variables
   std::shared_ptr<solution> pVelocity_solution{nullptr},
       pPressure_solution{nullptr};
+
+  // Objective function
+  ObjectiveFunction objective_function_{ObjectiveFunction::viscous_dissipation};
 };
 
 } // namespace pygadjoints
