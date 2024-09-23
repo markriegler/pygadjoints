@@ -201,6 +201,8 @@ void StokesProblem::SetObjectiveFunction(
     const int objective_function_selector) {
   if (objective_function_selector == 1) {
     objective_function_ = ObjectiveFunction::viscous_dissipation;
+  } else if (objective_function_selector == 2) {
+    objective_function_ = ObjectiveFunction::early_deflection;
   } else {
     throw std::runtime_error("Objective function not known!");
   }
@@ -224,8 +226,11 @@ double StokesProblem::ComputeObjectiveFunctionValue() {
     auto vel_gradient = igrad(velocity_solution, geoMap);
     auto strain_tensor = 0.5 * (vel_gradient + vel_gradient.cwisetr());
     objective_value = expression_evaluator.integral(
-      -1.0 * viscosity_ * strain_tensor * strain_tensor.tr() * meas(geoMap)
-    );
+        -1.0 * viscosity_ * strain_tensor * strain_tensor.tr() * meas(geoMap));
+  } else if (objective_function_ == ObjectiveFunction::early_deflection) {
+    auto vy = velocity_solution[1];
+    objective_value =
+        expression_evaluator.integral(-1.0 * vy * vy * meas(geoMap));
   } else {
     throw std::runtime_error("Objective function not known!");
   }
@@ -249,6 +254,28 @@ void StokesProblem::ExportParaview(const std::string &fname,
   collection.newTimeStep(&mp_pde);
   collection.addField(*pVelocity_solution, "velocity");
   collection.addField(*pPressure_solution, "pressure");
+  // Save residual
+  solution &velocity_solution = *pVelocity_solution;
+  solution &pressure_solution = *pPressure_solution;
+  const geometryMap &geoMap = *pGeometry_expression;
+  auto vel_laplace = ilapl(velocity_solution, geoMap);
+  auto p_grad = idiv(pressure_solution, geoMap);
+  auto residual = viscosity_ * vel_laplace - p_grad;
+  collection.addField(residual, "residual");
+  // Velocity divergence
+  auto vel_div = idiv(velocity_solution, geoMap);
+  collection.addField(vel_div, "vel divergence");
+
+  if (objective_function_ == ObjectiveFunction::viscous_dissipation) {
+    // Plot viscous dissipation
+    solution &velocity_solution = *pVelocity_solution;
+    const geometryMap &geoMap = *pGeometry_expression;
+    // gsExprEvaluator<> expression_evaluator(expr_assembler_pde);
+    auto vel_gradient = igrad(velocity_solution, geoMap);
+    auto strain_tensor = 0.5 * (vel_gradient + vel_gradient.cwisetr());
+    auto dissipation = viscosity_ * strain_tensor * strain_tensor.tr();
+    collection.addField(dissipation, "dissipation");
+  }
   // if (has_solution) {
   //   auto solution_given = expr_assembler_pde.getCoeff(analytical_solution,
   //                                                     *pGeometry_expression);
@@ -276,7 +303,7 @@ void StokesProblem::ExportXML(const std::string &fname) {
   velocity_data << velocity_solution;
   pressure_data << pressure_solution;
 
-  velocity_data.save(fname + "_pressure.xml");
-  pressure_data.save(fname + "_velocity.xml");
+  velocity_data.save(fname + "_velocity.xml");
+  pressure_data.save(fname + "_pressure.xml");
 }
 } // namespace pygadjoints

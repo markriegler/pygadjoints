@@ -8,7 +8,10 @@ namespace py = pybind11;
 
 enum class ObjectiveFunction : int {
   // Maximize ∫ ε(v) : ε(v) dΩ = 0.5⋅∫ ∇v : (∇v+(∇v)ᵀ) dΩ
-  viscous_dissipation = 1
+  viscous_dissipation = 1,
+  // Early deflection: maximize ∫ (l-x)⋅(v_y)² dΩ if flow is going in
+  // x-direction
+  early_deflection = 2
 };
 
 class StokesProblem : public PdeProblem {
