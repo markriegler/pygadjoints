@@ -203,6 +203,8 @@ void StokesProblem::SetObjectiveFunction(
     objective_function_ = ObjectiveFunction::viscous_dissipation;
   } else if (objective_function_selector == 2) {
     objective_function_ = ObjectiveFunction::early_deflection;
+  } else if (objective_function_selector == 3) {
+    objective_function_ = ObjectiveFunction::pressure_loss;
   } else {
     throw std::runtime_error("Objective function not known!");
   }
@@ -231,6 +233,12 @@ double StokesProblem::ComputeObjectiveFunctionValue() {
     auto vy = velocity_solution[1];
     objective_value =
         expression_evaluator.integral(-1.0 * vy * vy * meas(geoMap));
+  } else if (objective_function_ == ObjectiveFunction::pressure_loss) {
+    real_t inlet_pressure = expression_evaluator.integralBdr(
+        pressure_solution * meas(geoMap), mp_pde.boundaries("BID2"));
+    real_t outlet_pressure = expression_evaluator.integralBdr(
+        pressure_solution * meas(geoMap), mp_pde.boundaries("BID3"));
+    objective_value = inlet_pressure - outlet_pressure;
   } else {
     throw std::runtime_error("Objective function not known!");
   }

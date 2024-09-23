@@ -170,8 +170,7 @@ public:
     return matrix;
   }
 
-  void UpdateGeometry(const std::string &fname,
-                         const bool &topology_changes) {
+  void UpdateGeometry(const std::string &fname, const bool &topology_changes) {
     const Timer timer("UpdateGeometry");
     if (topology_changes) {
       throw std::runtime_error("Not Implemented!");

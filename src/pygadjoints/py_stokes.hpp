@@ -11,7 +11,9 @@ enum class ObjectiveFunction : int {
   viscous_dissipation = 1,
   // Early deflection: maximize ∫ (l-x)⋅(v_y)² dΩ if flow is going in
   // x-direction
-  early_deflection = 2
+  early_deflection = 2,
+  // pressure loss: minimize ∮ p dsᵢₙ - ∮ p dsₒᵤₜ
+  pressure_loss = 3
 };
 
 class StokesProblem : public PdeProblem {
