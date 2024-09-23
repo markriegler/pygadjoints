@@ -15,7 +15,7 @@ DENSITY = 1
 VISCOSITY = 1
 
 # Simulation parameters
-N_REFINEMENTS = 2
+N_REFINEMENTS = 3
 DEGREE_ELEVATIONS = 1
 
 
@@ -150,6 +150,6 @@ if __name__ == "__main__":
     stokes.export_paraview(
         fname="microstructure_solution",
         plot_elements=False,
-        sample_rate=3**2,
+        sample_rate=32**2,
         binary=True,
     )
