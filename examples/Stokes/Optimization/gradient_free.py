@@ -16,7 +16,7 @@ BOX_LENGTH = 5
 BOX_HEIGHT = 1
 SHOW_MICROSTRUCTURE = False
 FILENAME = "microstructure.xml"
-N_THREADS = 10
+N_THREADS = 1
 sp.settings.NTHREADS = N_THREADS
 
 # Material parameters
@@ -322,7 +322,7 @@ class SimulationKernel:
         self.pde.export_paraview(
             fname=filename,
             plot_elements=False,
-            sample_rate=3**2,
+            sample_rate=16**2,
             binary=True,
         )
 
@@ -493,7 +493,9 @@ class OptimizationKernel:
         return self.current_objective_function_value
 
     def evaluate_jacobian(self, current_optimization_parameters):
-        raise NotImplementedError("The Jacobian evaluation is not yet implemented!")
+        raise NotImplementedError(
+            "The Jacobian evaluation is not yet implemented!"
+        )
 
     def optimize(self, jacobian_provided=False, bounds=None):
         if jacobian_provided:
@@ -557,7 +559,7 @@ if __name__ == "__main__":
     initial_parameter_spline = sp.BSpline(
         degrees=[1, 1],
         knot_vectors=[[0, 0, 0.5, 1, 1], [0, 0, 1, 1]],
-        control_points=random_params.reshape(-1,1)
+        control_points=random_params.reshape(-1, 1)
         # control_points=np.array([0.02, 0.02, 0.02, 0.02, 0.02, 0.02]).reshape(
         #     -1, 1
         # ),
@@ -571,7 +573,7 @@ if __name__ == "__main__":
         # parameter_spline_cps_dimensions=[6,2],
         # initial_parameter_value=0.3,
         initial_parameter_spline=initial_parameter_spline,
-        closing_face="x",
+        closing_face="y",
         additional_parameters={"contact_length": 0.8},
         boundary_identifier_dict=boundary_identifier_dict,
     )
@@ -622,7 +624,7 @@ if __name__ == "__main__":
         h_refinements=N_REFINEMENTS,
         degree_elevations=DEGREE_ELEVATIONS,
         print_summary=True,
-        objective_function_type=1,
+        objective_function_type=2,
     )
 
     optimizer = OptimizationKernel(
