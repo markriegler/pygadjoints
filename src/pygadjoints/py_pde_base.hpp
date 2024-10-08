@@ -88,6 +88,9 @@ protected:
   // Number of refinements in the current iteration
   int dimensionality_{};
 
+  // For tracking objective function values during optimization
+  std::vector<double> objective_function_evolution{};
+
 #ifdef PYGADJOINTS_USE_OPENMP
   int n_omp_threads{1};
 #endif

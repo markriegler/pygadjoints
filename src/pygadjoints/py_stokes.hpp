@@ -1,4 +1,5 @@
 #include "pygadjoints/py_pde_base.hpp"
+#include <pybind11/stl.h>
 
 namespace pygadjoints {
 
@@ -6,19 +7,20 @@ using namespace gismo;
 
 namespace py = pybind11;
 
-enum class ObjectiveFunction : int {
-  // Maximize ∫ ε(v) : ε(v) dΩ = 0.5⋅∫ ∇v : (∇v+(∇v)ᵀ) dΩ
-  viscous_dissipation = 1,
-  // Early deflection: maximize ∫ (l-x)⋅(v_y)² dΩ if flow is going in
-  // x-direction
-  early_deflection = 2,
-  // pressure loss: minimize ∮ p dsᵢₙ - ∮ p dsₒᵤₜ
-  pressure_loss = 3
-};
+// enum class ObjectiveFunction : int {
+//   // Maximize ∫ ε(v) : ε(v) dΩ = 0.5⋅∫ ∇v : (∇v+(∇v)ᵀ) dΩ
+//   viscous_dissipation = 1,
+//   // Early deflection: maximize ∫ (l-x)⋅(v_y)² dΩ if flow is going in
+//   // x-direction
+//   early_deflection = 2,
+//   // pressure loss: minimize ∮ p dsᵢₙ - ∮ p dsₒᵤₜ
+//   pressure_loss = 3
+// };
 
 class StokesProblem : public PdeProblem {
 private:
   using SolverType = gsSparseSolver<>::LU;
+  // using SolverType = gsSparseSolver<>::CGDiagonal;
   // using SolverType = gsSparseSolver<>::BiCGSTABILUT;
 
 public:
@@ -63,9 +65,16 @@ public:
   void ExportParaview(const std::string &fname, const bool &plot_elements,
                       const int &sample_rate, const bool &export_b64);
 
-  void SetObjectiveFunction(const int objective_function_selector);
+  void AddObjectiveFunction(const int objective_function_selector);
 
-  double ComputeObjectiveFunctionValue();
+  std::vector<double> ComputeObjectiveFunctionValues();
+
+  // Compute the outflow via surface integral of x-velocity
+  double ComputeOutflow();
+
+  double ComputeVelDivergence();
+
+  void HRefine();
 
   void ExportXML(const std::string &fname);
 
@@ -93,8 +102,7 @@ private:
   std::shared_ptr<solution> pVelocity_solution{nullptr},
       pPressure_solution{nullptr};
 
-  // Objective function
-  ObjectiveFunction objective_function_{ObjectiveFunction::viscous_dissipation};
+  std::vector<int> objective_functions_selected{};
 };
 
 } // namespace pygadjoints

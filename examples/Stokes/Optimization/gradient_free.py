@@ -12,22 +12,30 @@ import splinepy as sp
 import pygadjoints
 
 EPS = 1e-8
-BOX_LENGTH = 5
-BOX_HEIGHT = 1
+BOX_LENGTH = 0.14
+BOX_HEIGHT = 0.041
 SHOW_MICROSTRUCTURE = False
 FILENAME = "microstructure.xml"
 N_THREADS = 1
 sp.settings.NTHREADS = N_THREADS
 
 # Material parameters
-DENSITY = 1
-VISCOSITY = 1
+DENSITY = 736
+VISCOSITY = 6000
 
 # Simulation parameters
-N_REFINEMENTS = 1
+TILING = [6, 3]
+N_REFINEMENTS = 0
 DEGREE_ELEVATIONS = 1
 INLET_BOUNDARY_ID = 2
 OUTLET_BOUNDARY_ID = 3
+INLET_PEAK_VELOCITY = 1.4336534897721067
+CLOSING_FACE = "x"
+# OBJECTIVE_FUNCTION = [1, 3]
+# OBJECTIVE_FUNCTION_WEIGHTS = [49927, 10.027]
+OBJECTIVE_FUNCTION = [2, 3]
+# OBJECTIVE_FUNCTION_WEIGHTS = [6.673e13, 5.700225]
+OBJECTIVE_FUNCTION_WEIGHTS = [7e5, 2e-3]
 
 
 # TODO: generator.parameter_sensitivity_function
@@ -252,7 +260,7 @@ class SimulationKernel:
         material_constants,
         filename,
         gismo_export_options,
-        objective_function_type,
+        objective_function_types,
         h_refinements=0,
         degree_elevations=0,
         print_summary=False,
@@ -274,7 +282,13 @@ class SimulationKernel:
         self.pde = pde_problem()
         self.pde.set_number_of_threads(nthreads=n_threads)
         self.pde.set_material_constants(**material_constants)
-        self.pde.set_objective_function(objective_function_type)
+
+        if isinstance(objective_function_types, int):
+            self.objective_function_types = [objective_function_types]
+        else:
+            self.objective_function_types = objective_function_types
+        for objective_function_type in self.objective_function_types:
+            self.pde.add_objective_function(objective_function_type)
 
         self.filename = filename
         self.h_refinements = h_refinements
@@ -313,8 +327,8 @@ class SimulationKernel:
         else:
             self.pde.solve_linear_system()
 
-    def evaluate_objective_function(self):
-        return self.pde.compute_objective_function_value()
+    def evaluate_objective_functions(self):
+        return self.pde.compute_objective_function_values()
 
     def save_geometry(self, filename):
         # TODO: export multipatch object
@@ -322,7 +336,7 @@ class SimulationKernel:
         self.pde.export_paraview(
             fname=filename,
             plot_elements=False,
-            sample_rate=16**2,
+            sample_rate=64**2,
             binary=True,
         )
 
@@ -333,7 +347,7 @@ class OptimizationKernel:
         geometry_kernel,
         simulation_kernel,
         optimization_method,
-        scaling_factor_objective_function=1.0,
+        scaling_factors_objective_function=None,
         optimization_macro_indices=None,
         write_logfiles=False,
     ):
@@ -355,9 +369,19 @@ class OptimizationKernel:
         """
         self.geometry_kernel = geometry_kernel
         self.simulation_kernel = simulation_kernel
-        self.scaling_factor_objective_function = (
-            scaling_factor_objective_function
-        )
+        n_objective_functions = len(simulation_kernel.objective_function_types)
+        if scaling_factors_objective_function is None:
+            self.scaling_factors_objective_function = [
+                1.0
+            ] * n_objective_functions
+        else:
+            assert (
+                len(scaling_factors_objective_function)
+                == n_objective_functions
+            ), "Each objective function must have a separate weight"
+            self.scaling_factors_objective_function = (
+                scaling_factors_objective_function
+            )
         self.optimization_macro_indices = optimization_macro_indices
         self.morph_macro_spline = optimization_macro_indices is not None
         self.write_logfiles = write_logfiles
@@ -474,10 +498,20 @@ class OptimizationKernel:
 
         # Perform forward simulation
         self.simulation_kernel.forward_simulation()
+
         # Update objective function value
-        self.current_objective_function_value = (
-            self.scaling_factor_objective_function
-            * self.simulation_kernel.evaluate_objective_function()
+        self.current_objective_values = (
+            self.simulation_kernel.evaluate_objective_functions()
+        )
+        print("----------", self.current_objective_values)
+        self.current_objective_function_value = sum(
+            [
+                scaling * objective_value
+                for scaling, objective_value in zip(
+                    self.scaling_factors_objective_function,
+                    self.current_objective_values,
+                )
+            ]
         )
 
         # For first iteration save initial geometry
@@ -533,6 +567,7 @@ class OptimizationKernel:
             values_to_write = [self.iteration]
             if include_objective_value:
                 values_to_write.append(self.current_objective_function_value)
+                values_to_write += self.current_objective_values
             values_to_write += list(values)
             newline = ", ".join([str(value) for value in values_to_write])
             f.write(newline + "\n")
@@ -554,27 +589,31 @@ if __name__ == "__main__":
         identifier_outlet: OUTLET_BOUNDARY_ID,
     }
 
-    random_params = np.random.random(6) * 0.33 + 0.02
+    # Describe initial parameter spline such that every tile is parametrized
+    knot_vectors = [np.linspace(0, 1, val * 2 + 1)[1:-1:2] for val in TILING]
+    knot_vectors = [np.hstack((kv[0], kv, kv[-1])) for kv in knot_vectors]
+
+    default_parameter_value = 0.18
+    control_points = default_parameter_value * np.ones(
+        np.prod([len(kv) - 2 for kv in knot_vectors])
+    ).reshape(-1, 1)
 
     initial_parameter_spline = sp.BSpline(
         degrees=[1, 1],
-        knot_vectors=[[0, 0, 0.5, 1, 1], [0, 0, 1, 1]],
-        control_points=random_params.reshape(-1, 1)
-        # control_points=np.array([0.02, 0.02, 0.02, 0.02, 0.02, 0.02]).reshape(
-        #     -1, 1
-        # ),
+        knot_vectors=knot_vectors,
+        control_points=control_points,
     )
 
     geometry_kernel = MicrostructureKernel(
         initial_macro_spline=initial_macro_spline,
         microtile=sp.microstructure.tiles.HollowOctagon(),
-        tiling=[12, 3],
-        # parameter_spline_degrees=[1,1],
-        # parameter_spline_cps_dimensions=[6,2],
-        # initial_parameter_value=0.3,
+        tiling=TILING,
+        # parameter_spline_degrees=[1, 1],
+        # parameter_spline_cps_dimensions=[15, 7],
+        # initial_parameter_value=0.18,
         initial_parameter_spline=initial_parameter_spline,
-        closing_face="y",
-        additional_parameters={"contact_length": 0.8},
+        closing_face=CLOSING_FACE,
+        additional_parameters={"contact_length": 0.5},
         boundary_identifier_dict=boundary_identifier_dict,
     )
 
@@ -585,7 +624,10 @@ if __name__ == "__main__":
     additional_blocks.add_boundary_conditions(
         block_id=2,
         dim=2,
-        function_list=["0", (f"y * ({BOX_HEIGHT}-y)", "0")],
+        function_list=[
+            "0",
+            (f"{INLET_PEAK_VELOCITY} * y * ({BOX_HEIGHT}-y)", "0"),
+        ],
         bc_list=[
             (f"BID{INLET_BOUNDARY_ID}", "Dirichlet", 1),  # Inlet
             ("BID1", "Dirichlet", 0),  # Walls
@@ -611,7 +653,23 @@ if __name__ == "__main__":
         block_id=4, comment=" Assembler options "
     )
 
+    n_tile_patches = 8
+    southeast_patch = (TILING[0] - 1) * n_tile_patches + 0
+    patch_corner = 2  # southwest: 1, southeast: 2, northwest: 3, northeast: 4
+
+    # Dirty fix: change pressure bcs to one corner value
     gismo_export_options = additional_blocks.to_list()
+    gismo_export_options[1]["children"] = [
+        {
+            "tag": "cv",
+            "attributes": {
+                "unknown": "0",
+                "patch": str(southeast_patch),
+                "corner": str(patch_corner),
+            },
+            "text": "0.0",
+        }
+    ]
 
     fluid_material_constants = {"viscosity": VISCOSITY, "density": DENSITY}
 
@@ -624,16 +682,17 @@ if __name__ == "__main__":
         h_refinements=N_REFINEMENTS,
         degree_elevations=DEGREE_ELEVATIONS,
         print_summary=True,
-        objective_function_type=2,
+        objective_function_types=OBJECTIVE_FUNCTION,
     )
 
     optimizer = OptimizationKernel(
         geometry_kernel=geometry_kernel,
         simulation_kernel=simulation_kernel,
         optimization_method="COBYQA",
+        scaling_factors_objective_function=OBJECTIVE_FUNCTION_WEIGHTS,
     )
 
-    bounds = [(0.02, 0.35) for _ in range(optimizer.n_optimization_parameters)]
+    bounds = [(0.04, 0.35) for _ in range(optimizer.n_optimization_parameters)]
 
     optimizer.optimize(bounds=bounds)
     optimizer.finalize()
