@@ -123,12 +123,30 @@ if __name__ == "__main__":
         block_id=4, comment=" Assembler options "
     )
 
+    n_tile_patches = 8
+    southeast_patch = (tiling[1] - 1) * n_tile_patches + 0
+    patch_corner = 2  # southwest: 1, southeast: 2, northwest: 3, northeast: 4
+
+    # Dirty fix: change pressure bcs to one corner value
+    gismo_export_options = additional_blocks.to_list()
+    gismo_export_options[1]["children"] = [
+        {
+            "tag": "cv",
+            "attributes": {
+                "unknown": "0",
+                "patch": str(southeast_patch),
+                "corner": str(patch_corner),
+            },
+            "text": "0.0",
+        }
+    ]
+
     # Export to xml-file
     sp.io.gismo.export(
         fname=FILENAME,
         multipatch=microstructure,
         indent=True,
-        additional_blocks=additional_blocks.to_list(),
+        additional_blocks=gismo_export_options,
     )
 
     # -------------------------- STOKES SIMULATION -----------------------------

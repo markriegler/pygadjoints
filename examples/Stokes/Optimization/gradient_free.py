@@ -313,7 +313,7 @@ class SimulationKernel:
             multipatch=multipatch_geometry,
             indent=True,
             additional_blocks=self.gismo_export_options,
-            as_base64=True,
+            as_base64=False,
         )
 
     def update_geometry(self):
