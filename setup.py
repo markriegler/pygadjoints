@@ -65,7 +65,7 @@ class CMakeBuild(build_ext):
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}{os.sep}",
             f"-DPYTHON_EXECUTABLE={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={cfg}",  # not used on MSVC, but no harm
-            '-GNinja',
+            "-GNinja",
         ]
         # extra cmake args
         # cmake_args.extend(ext.extra_args["cmake_args"])
@@ -142,18 +142,22 @@ class CMakeBuild(build_ext):
             # if len(ext.extra_args["build_args"]) != 0:
             #    build_args.extend(ext.extra_args["build_args"])
 
-        build_dir = Path('build') / ext.name
+        build_dir = Path("build") / ext.name
         if not build_dir.exists():
             build_dir.mkdir(parents=True)
 
         # Check if CMake configuration needs to be run
-        cmake_cache_file = build_dir / 'CMakeCache.txt'
+        cmake_cache_file = build_dir / "CMakeCache.txt"
         if not cmake_cache_file.exists():
             subprocess.run(
-                ["cmake", ext.sourcedir] + cmake_args, cwd=build_dir, check=True
+                ["cmake", ext.sourcedir] + cmake_args,
+                cwd=build_dir,
+                check=True,
             )
         else:
-            print("CMake configuration already exists, skipping configuration step.")
+            print(
+                "CMake configuration already exists, skipping configuration step."
+            )
         subprocess.run(
             ["cmake", "--build", "."] + build_args, cwd=build_dir, check=True
         )

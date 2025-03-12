@@ -52,7 +52,7 @@ if(CMAKE_BUILD_TYPE MATCHES Debug)
         -Wno-unused-variable
         -Wzero-as-null-pointer-constant)
   else()
-    message(WARNING "tetgenpy is only tested with GNU and Clang.")
+    message(WARNING "pygadjdoints is only tested with GNU and Clang.")
   endif()
 endif()
 
