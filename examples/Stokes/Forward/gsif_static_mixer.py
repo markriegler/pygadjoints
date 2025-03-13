@@ -169,8 +169,10 @@ if __name__ == "__main__":
     # stokes.add_objective_function(3)
 
     # Forward simulation
-    stokes.assemble()
-    stokes.solve_linear_system()
+    stokes.assemble_fluid_problem()
+    stokes.solve_fluid_linear_system()
+    stokes.assemble_heat_problem()
+    stokes.solve_heat_linear_system()
     
     # obj_values = stokes.compute_objective_function_values()
     # print("--------")
@@ -178,6 +180,6 @@ if __name__ == "__main__":
 
     # Write to ParaView file
     stokes.export_paraview(
-        filename="gsif_static_mixer_solution",
+        filename="ParaviewOutput/gsif_static_mixer_solution",
         sample_rate=int(64**2),
     )

@@ -50,9 +50,13 @@ class StokesTemperatureProblem {
   
     // Boundary conditions
     gsBoundaryConditions<> bcInfo;
+    gsBoundaryConditions<> temperatureBcInfo;
   
     // Source function (for Stokes assembler)
     gsFunctionExpr<> fSource;
+
+    // Functions for the convection-diffusion equation
+    gsFunctionExpr<> coeffDiffusion, coeffReaction, cdrRhs;
   
     // Number of refinements in the current iteration
     int n_refinements{};
@@ -67,19 +71,31 @@ class StokesTemperatureProblem {
     bool equalOrderBases{false};
   
     // Navier-Stokes PDE object
-    std::shared_ptr<gsNavStokesPde<real_t>> NSPde;
+    std::shared_ptr<gsNavStokesPde<real_t>> pNSPde{nullptr};
   
     // Parameters for the flow solver
-    std::shared_ptr<gsFlowSolverParams<real_t>> flowParams;
+    std::shared_ptr<gsFlowSolverParams<real_t>> pFlowParams{nullptr};
   
     // Solver option list
     gsOptionList solveOpt;
   
     // Fluid solver
     std::shared_ptr<gsINSSolverSteady<real_t, ColMajor>> pNSSolver{nullptr};
+
+    // Heat problem PDE
+    std::shared_ptr<gsConvDiffRePde<real_t>> pHeatPde{nullptr};
   
-    // // Function basis for velocity and pressure
-    // gsMultiBasis<> velocity_basis, pressure_basis;
+    // Function basis for temperature
+    gsMultiBasis<> functionBasisTemperature;
+
+    // Heat problem assembler
+    std::shared_ptr<gsCDRAssembler<real_t>> pHeatAssembler{nullptr};
+
+    // Heat problem linear system solver
+    gsSparseSolver<>::BiCGSTABILUT heatSolver;
+
+    // Heat problem solution vector
+    gsMatrix<> heatSolutionVector;
   
     // // Discretization spaces
     // std::shared_ptr<space> pVelocity_space{nullptr}, pPressure_space{nullptr};
@@ -144,10 +160,16 @@ public:
             const bool useEqualOrderBases = false, const bool printSummary = false);
 
   /// @brief Assemble the system matrix and rhs of the Stokes equation
-  void Assemble();
+  void AssembleFluidProblem();
 
-  /// @brief Solve linear system of system matrix and system rhs
-  void SolveLinearSystem();
+  /// @brief Asemble the system matrix and rhs for the heat problem
+  void AssembleHeatProblem();
+
+  /// @brief Solve linear system of Stokes' system matrix and rhs
+  void SolveFluidLinearSystem();
+
+  /// @brief Solve linear system of the heat problem's system matrix and rhs
+  void SolveHeatLinearSystem();
 
   /// @brief Exporting the field variables to a ParaView file
   /// @param fname Output file name

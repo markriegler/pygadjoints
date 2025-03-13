@@ -20,8 +20,10 @@ void add_stokes_temperature_problem(py::module_ &m) {
       .def("export_paraview", &stokes::ExportParaview, arg("filename"),
                               arg("sample_rate"))
   //     .def("export_xml", &stokes::ExportXML, arg("fname"))
-      .def("assemble", &stokes::Assemble)
-      .def("solve_linear_system", &stokes::SolveLinearSystem)
+      .def("assemble_fluid_problem", &stokes::AssembleFluidProblem)
+      .def("solve_fluid_linear_system", &stokes::SolveFluidLinearSystem)
+      .def("assemble_heat_problem", &stokes::AssembleHeatProblem)
+      .def("solve_heat_linear_system", &stokes::SolveHeatLinearSystem)
   //     .def("update_geometry", &stokes::UpdateGeometry, arg("fname"),
   //          arg("topology_changes"))
   //     .def("add_objective_function", &stokes::AddObjectiveFunction,
@@ -59,6 +61,7 @@ void StokesTemperatureProblem::ReadInputFromFile(const std::string &filename) {
 
   // Read boundary conditions for fluid velocity (id 0) and pressure (id 1)
   fd.getId(fluidBcId, bcInfo);
+  fd.getId(temperatureBcId, temperatureBcInfo);
 
   // Set source term to zero if not given, otherwise read from file
   if (fd.hasId(sourceFunctionId)) {
@@ -78,9 +81,6 @@ void StokesTemperatureProblem::ReadInputFromFile(const std::string &filename) {
     fd.getId(pressureAnalyticalId, pressureAnalyticalSolution);
     hasVelocitySolution = true;
   }
-
-  // Read heat problem related info
-  
 }
 
 void StokesTemperatureProblem::Init(const std::string &filename,
@@ -96,11 +96,14 @@ void StokesTemperatureProblem::Init(const std::string &filename,
 
   // Set up discretization bases
   gsMultiBasis<> basis(mpPde);
+  functionBasisTemperature = gsMultiBasis<>(mpPde);
   // Elevate degree
   basis.setDegree(basis.maxCwiseDegree() + numberDegreeElevations);
+  functionBasisTemperature.setDegree(basis.maxCwiseDegree() + numberDegreeElevations);
   // h-refinement
   for (int r = 0; r < numberOfRefinements; ++r) {
     basis.uniformRefine();
+    functionBasisTemperature.uniformRefine();
   }
   // Create bases for velocity and pressure
   std::vector<gsMultiBasis<>> discreteBases{basis, basis};
@@ -110,11 +113,11 @@ void StokesTemperatureProblem::Init(const std::string &filename,
   }
 
   // Initialize Navier-Stokes PDE object
-  NSPde = std::make_shared<gsNavStokesPde<real_t>>(mpPde, bcInfo, &fSource, viscosity_);
-  flowParams = std::make_shared<gsFlowSolverParams<real_t>>(*NSPde, discreteBases);
-  flowParams->options().setSwitch("quiet", printSummary);
+  pNSPde = std::make_shared<gsNavStokesPde<real_t>>(mpPde, bcInfo, &fSource, viscosity_);
+  pFlowParams = std::make_shared<gsFlowSolverParams<real_t>>(*pNSPde, discreteBases);
+  pFlowParams->options().setSwitch("quiet", printSummary);
   // TODO: for now element by element assembly. Maybe in future make user decide
-  flowParams->options().setString("assemb.loop", "EbE");
+  pFlowParams->options().setString("assemb.loop", "EbE");
 
   solveOpt.addInt("geo", "", 0);
   
@@ -129,31 +132,75 @@ void StokesTemperatureProblem::Init(const std::string &filename,
   // Steady without any iterations
   if (useDirectSolver) {
     solveOpt.setString("id", "steady");
-    flowParams->options().setString("lin.solver", "direct");
+    pFlowParams->options().setString("lin.solver", "direct");
   } else {
     solveOpt.setString("id", "steadyIt");
-    flowParams->options().setString("lin.solver", "iter");
-    flowParams->options().setString("lin.solver", "iter");
-    flowParams->options().setInt("lin.maxIt", 50);
-    flowParams->options().setReal("lin.tol", 1e-6);
-    flowParams->options().setString("lin.precType", "MSIMPLER_FdiagEqual");
+    pFlowParams->options().setString("lin.solver", "iter");
+    pFlowParams->options().setString("lin.solver", "iter");
+    pFlowParams->options().setInt("lin.maxIt", 50);
+    pFlowParams->options().setReal("lin.tol", 1e-6);
+    pFlowParams->options().setString("lin.precType", "MSIMPLER_FdiagEqual");
   }
   
   // Initialize fluid solver
-  pNSSolver = std::make_shared<gsINSSolverSteady<real_t, ColMajor>>(flowParams);
+  pNSSolver = std::make_shared<gsINSSolverSteady<real_t, ColMajor>>(pFlowParams);
 
   // Prepare heat problem
-
+  // Define diffusion term
+  std::vector<std::string> diffusionTermStrings;
+  for (int i = 0; i < dimensionality_; ++i) {
+    for (int j = 0; j < dimensionality_; ++j) {
+      // Fill diagnoal with thermal diffusivity value
+      if (i == j) {
+        diffusionTermStrings.push_back(std::to_string(thermalDiffusivity_));
+      } else {
+        diffusionTermStrings.push_back("0.0");
+      }
+    }
+  }
+  gsFunctionExpr<> diffusionTerm(diffusionTermStrings, dimensionality_);
+  coeffDiffusion = diffusionTerm;
+  // Reaction term
+  gsFunctionExpr<> reactionTerm("0.0", dimensionality_);
+  coeffReaction = reactionTerm;
+  // Rhs term, TODO: heat generation due to viscous dissipation
+  gsFunctionExpr<> rhsTerm("0.0", dimensionality_);
+  cdrRhs = rhsTerm;
 }
 
-void StokesTemperatureProblem::Assemble() {
-  const Timer timer("Assemble");
+void StokesTemperatureProblem::AssembleFluidProblem() {
+  const Timer timer("AssembleFluidProblem");
   pNSSolver->initialize();
 }
 
-void StokesTemperatureProblem::SolveLinearSystem() {
-  const Timer timer("SolveLinearSystem");
+void StokesTemperatureProblem::SolveFluidLinearSystem() {
+  const Timer timer("SolveFluidLinearSystem");
   pNSSolver->solveStokes();
+}
+
+void StokesTemperatureProblem::AssembleHeatProblem() {
+  const Timer timer("AssembleHeatProblem");
+  
+  // Get velocity field, TODO: make this a variable and update it
+  gsField<> velocityField = pNSSolver->constructSolution(0);
+  const gsFunctionSet<>& velocityFieldSet = velocityField.fields();
+
+  pHeatPde = std::make_shared<gsConvDiffRePde<real_t>>(mpPde, temperatureBcInfo,
+                &coeffDiffusion, &velocityFieldSet, &coeffReaction, &cdrRhs);
+
+  // Define assembler, TODO: define before and just assemble here
+  pHeatAssembler = std::make_shared<gsCDRAssembler<real_t>>(*pHeatPde, functionBasisTemperature);
+  pHeatAssembler->options().setInt("Stabilization", stabilizerCDR::SUPG);
+  pHeatAssembler->options().setInt("DirichletValues", dirichlet::l2Projection);
+
+  pHeatAssembler->assemble();
+}
+
+void StokesTemperatureProblem::SolveHeatLinearSystem() {
+  const Timer timer("SolveHeatLinearSystem");
+  
+  heatSolver.compute(pHeatAssembler->matrix());
+  heatSolutionVector = heatSolver.solve(pHeatAssembler->rhs());
 }
 
 void StokesTemperatureProblem::ExportParaview(const std::string& fname, const int &sampleRate) {
@@ -164,6 +211,10 @@ void StokesTemperatureProblem::ExportParaview(const std::string& fname, const in
 
   gsWriteParaview<>(velocityField, fname+"_velocity", sampleRate);
   gsWriteParaview<>(pressureField, fname+"_pressure", sampleRate);
+
+  // Heat problem
+  gsField<> temperatureField = pHeatAssembler->constructSolution(heatSolutionVector);
+  gsWriteParaview<>(temperatureField, fname+"_temperature", sampleRate);
 }
 
 }// namespace pygadjoints
