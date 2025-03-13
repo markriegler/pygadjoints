@@ -1,6 +1,7 @@
 [submodule "third_party/gismo"]
 	path = third_party/gismo
-	url = git@github.com:gismo/gismo.git
+	url = git@github.com:markriegler/gismo.git
+	branch = ft-temperature-convection
 [submodule "third_party/pybind11"]
 	path = third_party/pybind11
 	url = git@github.com:pybind/pybind11.git
