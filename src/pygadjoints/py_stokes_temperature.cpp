@@ -298,15 +298,83 @@ std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
           // Perform numerical integration
           for (index_t k = 0; k != mdBoundary.points.cols(); ++k) {
             if (bit->label() == inletID) {
-              inletPressure += quWeightsBoundary[k] * mdBoundary.measure(k) * basisValues(k);
+              inletPressure +=
+                  quWeightsBoundary[k] * mdBoundary.measure(k) * basisValues(k);
             } else if (bit->label() == outletID) {
-              outletPressure += quWeightsBoundary[k] * mdBoundary.measure(k) * basisValues(k);
-            }   
+              outletPressure +=
+                  quWeightsBoundary[k] * mdBoundary.measure(k) * basisValues(k);
+            }
           }
           // Update boundary patch iterator
           ++boundaryPatchIt;
         }
         objective_value = inletPressure - outletPressure;
+      }
+      // Length computation
+    } else if (objective_function_index == 2) {
+      std::vector<real_t> quadratureWeights, basisValuesList;
+      for (gsMultiPatch<>::const_biterator bit = mpPde.bBegin();
+           bit != mpPde.bEnd(); ++bit) {
+        // Compute inlet volume
+        if (bit->label() != outletID) {
+          continue;
+        }
+        const gsGeometry<> &patch = mpPde[bit->patch];
+        // Get basis for pressure (patch and boundary side)
+        gsBasis<> &pressureBasis = pFlowParams->getBases()[1].basis(bit->patch);
+        typename gsBasis<>::uPtr pressureBoundaryBasis =
+            pressureBasis.boundaryBasis(bit->side());
+        // Get quadrature rules
+        QuRuleBoundary =
+            gsQuadrature::getPtr(*pressureBoundaryBasis, assemblyOptions);
+        QuRulePatch = gsQuadrature::getPtr(pressureBasis, assemblyOptions);
+        // Iterators over sides of boundary element patches
+        typename gsBasis<>::domainIter boundaryElementIt =
+            pressureBoundaryBasis->domain()->beginAll();
+        typename gsBasis<>::domainIter boundaryElementItEnd =
+            pressureBoundaryBasis->domain()->endAll();
+        // Iterator over patches of boundary elements
+        typename gsBasis<>::domainIter boundaryPatchIt =
+            pressureBasis.domain()->beginBdr(bit->side());
+        // Get boundary side basis
+        typename gsGeometry<>::uPtr pBoundary = patch.boundary(bit->side());
+        for (; boundaryElementIt < boundaryElementItEnd; ++boundaryElementIt) {
+          // Map quadrature to corresponding patch (side)
+          QuRuleBoundary->mapTo(boundaryElementIt.lowerCorner(),
+                                boundaryElementIt.upperCorner(),
+                                mdBoundary.points, quWeightsBoundary);
+          QuRulePatch->mapTo(boundaryPatchIt.lowerCorner(),
+                             boundaryPatchIt.upperCorner(), mdPatch.points,
+                             quWeightsPatch);
+          // Compute mapping for boundary;s side
+          pBoundary->computeMap(mdBoundary);
+          // Get values at boundary's patch
+          basisValues = pressureField.value(mdPatch.points, bit->patch);
+          // Collect all quadrature information
+          for (index_t k = 0; k != mdBoundary.points.cols(); ++k) {
+            quadratureWeights.push_back(quWeightsBoundary[k] *
+                                        mdBoundary.measure(k));
+            basisValuesList.push_back(basisValues(k));
+          }
+          // Update boundary patch iterator
+          ++boundaryPatchIt;
+        }
+        // Compute average temperature
+        real_t temperatureIntegral{0.0}, boundaryLength{0.0};
+        index_t nEntries = quadratureWeights.size();
+        for (index_t i = 0; i < nEntries; ++i) {
+          boundaryLength += quadratureWeights[i];
+          temperatureIntegral += quadratureWeights[i] * basisValuesList[i];
+        }
+        real_t temperatureAverage = temperatureIntegral / boundaryLength;
+        // Compute L2-deviation to average temperature
+        real_t temperatureDifference;
+        for (index_t i = 0; i < nEntries; ++i) {
+          temperatureDifference = basisValuesList[i] - temperatureAverage;
+          objective_value += temperatureDifference * temperatureDifference *
+                             quadratureWeights[i];
+        }
+        objective_value = math::sqrt(objective_value);
       }
     } else {
       throw std::runtime_error("Objective function not known!\n");
