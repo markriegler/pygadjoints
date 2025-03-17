@@ -18,16 +18,6 @@ using namespace gismo;
 
 namespace py = pybind11;
 
-// enum class ObjectiveFunction : int {
-//   // Maximize ∫ ε(v) : ε(v) dΩ = 0.5⋅∫ ∇v : (∇v+(∇v)ᵀ) dΩ
-//   viscous_dissipation = 1,
-//   // Early deflection: maximize ∫ (l-x)⋅(v_y)² dΩ if flow is going in
-//   // x-direction
-//   early_deflection = 2,
-//   // pressure loss: minimize ∮ p dsᵢₙ - ∮ p dsₒᵤₜ
-//   pressure_loss = 3
-// };
-
 class StokesTemperatureProblem {
 private:
 #ifdef PYGADJOINTS_USE_OPENMP

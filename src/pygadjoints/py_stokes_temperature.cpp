@@ -235,6 +235,10 @@ void StokesTemperatureProblem::AddObjectiveFunction(
 std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
   const Timer timer("ComputeObjectiveFunction");
 
+  // Define in- and oulet boundary IDs
+  const std::string inletID = "BID2";
+  const std::string outletID = "BID3";
+
   real_t objective_value;
   std::vector<real_t> objective_function_values;
 
@@ -250,12 +254,14 @@ std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
   for (auto &objective_function_index : objective_functions_selected) {
     objective_value = 0.0;
 
+    // Objective 1: pressure loss
     if (objective_function_index == 1) {
+      real_t inletPressure{0.0}, outletPressure(0.0);
       // Go through every boundary
       for (gsMultiPatch<>::const_biterator bit = mpPde.bBegin();
            bit != mpPde.bEnd(); ++bit) {
-        // Only compute for outlet boundary
-        if (bit->label() != "BID2") {
+        // Compute inlet pressure
+        if (!(bit->label() == inletID or bit->label() == outletID)) {
           continue;
         }
         const gsGeometry<> &patch = mpPde[bit->patch];
@@ -291,12 +297,16 @@ std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
           basisValues = pressureField.value(mdPatch.points, bit->patch);
           // Perform numerical integration
           for (index_t k = 0; k != mdBoundary.points.cols(); ++k) {
-            objective_value +=
-                quWeightsBoundary[k] * mdBoundary.measure(k) * basisValues(k);
+            if (bit->label() == inletID) {
+              inletPressure += quWeightsBoundary[k] * mdBoundary.measure(k) * basisValues(k);
+            } else if (bit->label() == outletID) {
+              outletPressure += quWeightsBoundary[k] * mdBoundary.measure(k) * basisValues(k);
+            }   
           }
           // Update boundary patch iterator
           ++boundaryPatchIt;
         }
+        objective_value = inletPressure - outletPressure;
       }
     } else {
       throw std::runtime_error("Objective function not known!\n");
