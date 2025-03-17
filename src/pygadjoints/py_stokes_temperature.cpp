@@ -250,6 +250,7 @@ std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
 
   gsField<> velocityField = pNSSolver->constructSolution(0);
   gsField<> pressureField = pNSSolver->constructSolution(1);
+  gsField<> temperatureField = pHeatAssembler->constructSolution(heatSolutionVector);
 
   for (auto &objective_function_index : objective_functions_selected) {
     objective_value = 0.0;
@@ -321,21 +322,20 @@ std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
         }
         const gsGeometry<> &patch = mpPde[bit->patch];
         // Get basis for pressure (patch and boundary side)
-        gsBasis<> &pressureBasis = pFlowParams->getBases()[1].basis(bit->patch);
-        typename gsBasis<>::uPtr pressureBoundaryBasis =
-            pressureBasis.boundaryBasis(bit->side());
+        const gsBasis<> &temperatureBasis = functionBasisTemperature.basis(bit->patch);
+        typename gsBasis<>::uPtr temperatureBoundaryBasis = temperatureBasis.boundaryBasis(bit->side());
         // Get quadrature rules
         QuRuleBoundary =
-            gsQuadrature::getPtr(*pressureBoundaryBasis, assemblyOptions);
-        QuRulePatch = gsQuadrature::getPtr(pressureBasis, assemblyOptions);
+            gsQuadrature::getPtr(*temperatureBoundaryBasis, assemblyOptions);
+        QuRulePatch = gsQuadrature::getPtr(temperatureBasis, assemblyOptions);
         // Iterators over sides of boundary element patches
         typename gsBasis<>::domainIter boundaryElementIt =
-            pressureBoundaryBasis->domain()->beginAll();
+            temperatureBoundaryBasis->domain()->beginAll();
         typename gsBasis<>::domainIter boundaryElementItEnd =
-            pressureBoundaryBasis->domain()->endAll();
+            temperatureBoundaryBasis->domain()->endAll();
         // Iterator over patches of boundary elements
         typename gsBasis<>::domainIter boundaryPatchIt =
-            pressureBasis.domain()->beginBdr(bit->side());
+            temperatureBasis.domain()->beginBdr(bit->side());
         // Get boundary side basis
         typename gsGeometry<>::uPtr pBoundary = patch.boundary(bit->side());
         for (; boundaryElementIt < boundaryElementItEnd; ++boundaryElementIt) {
@@ -349,7 +349,7 @@ std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
           // Compute mapping for boundary;s side
           pBoundary->computeMap(mdBoundary);
           // Get values at boundary's patch
-          basisValues = pressureField.value(mdPatch.points, bit->patch);
+          basisValues = temperatureField.value(mdPatch.points, bit->patch);
           // Collect all quadrature information
           for (index_t k = 0; k != mdBoundary.points.cols(); ++k) {
             quadratureWeights.push_back(quWeightsBoundary[k] *
