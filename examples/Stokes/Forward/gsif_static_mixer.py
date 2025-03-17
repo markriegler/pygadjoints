@@ -15,8 +15,6 @@ Material: blown film grade of HDPE (Hostalen GD 9550F)
     Carreau T_s: 237 K
 """
 
-import numpy as np
-import splinepy as sp
 
 import pygadjoints
 
@@ -29,7 +27,7 @@ N_THREADS = 1
 
 # Material parameters
 DENSITY = 736
-VISCOSITY = 6000 # Approximated by looking at https://www.ptonline.com/blog/post/understanding-the-effect-of-polymer-viscosity-on-melt-temperature
+VISCOSITY = 6000  # Approximated by looking at https://www.ptonline.com/blog/post/understanding-the-effect-of-polymer-viscosity-on-melt-temperature
 HEAT_CAPACITY = 2900
 THERMAL_DIFFUSIVITY = 1.1997e-7
 
@@ -115,7 +113,10 @@ if __name__ == "__main__":
     # additional_blocks.add_boundary_conditions(
     #     block_id=2,
     #     dim=2,
-    #     function_list=[("0", "0"), (f"{INLET_PEAK_VELOCITY} * y * ({BOX_HEIGHT}-y)", "0")],
+    #     function_list=[
+    #         ("0", "0"),
+    #         (f"{INLET_PEAK_VELOCITY} * y * ({BOX_HEIGHT}-y)", "0")
+    #     ],
     #     bc_list=[
     #         ("BID2", "Dirichlet", 1),  # Inlet
     #         ("BID1", "Dirichlet", 0),  # Walls
@@ -156,7 +157,7 @@ if __name__ == "__main__":
         viscosity=VISCOSITY,
         density=DENSITY,
         heat_capacity=HEAT_CAPACITY,
-        thermal_diffusivity=THERMAL_DIFFUSIVITY
+        thermal_diffusivity=THERMAL_DIFFUSIVITY,
     )
     stokes.init(
         fname=FILENAME,
@@ -164,8 +165,8 @@ if __name__ == "__main__":
         degree_elevations=DEGREE_ELEVATIONS,
         print_summary=False,
     )
-    
-    # stokes.add_objective_function(2)
+
+    stokes.add_objective_function(1)
     # stokes.add_objective_function(3)
 
     # Forward simulation
@@ -173,13 +174,13 @@ if __name__ == "__main__":
     stokes.solve_fluid_linear_system()
     stokes.assemble_heat_problem()
     stokes.solve_heat_linear_system()
-    
-    # obj_values = stokes.compute_objective_function_values()
-    # print("--------")
-    # print(obj_values)
 
-    # Write to ParaView file
-    stokes.export_paraview(
-        filename="ParaviewOutput/gsif_static_mixer_solution",
-        sample_rate=int(64**2),
-    )
+    obj_values = stokes.compute_objective_function_values()
+    print("--------")
+    print(obj_values)
+
+    # # Write to ParaView file
+    # stokes.export_paraview(
+    #     filename="ParaviewOutput/gsif_static_mixer_solution",
+    #     sample_rate=int(64**2),
+    # )

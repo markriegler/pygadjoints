@@ -1,14 +1,14 @@
+#include <chrono>
 #include <gismo.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
-#include <chrono>
 
 #ifdef PYGADJOINTS_USE_OPENMP
 #include <omp.h>
 #endif
 
-#include <gsIncompressibleFlow/src/gsINSSolver.h>
 #include <gsIncompressibleFlow/src/gsFlowUtils.h>
+#include <gsIncompressibleFlow/src/gsINSSolver.h>
 
 #include "pygadjoints/timer.hpp"
 
@@ -29,82 +29,92 @@ namespace py = pybind11;
 // };
 
 class StokesTemperatureProblem {
-  private:
-  #ifdef PYGADJOINTS_USE_OPENMP
-    int n_omp_threads{1};
-  #endif
-    // Fluid parameters
-    real_t density_{1};             // Unit: kg/m³
-    real_t viscosity_{1};           // Dynamic viscosity in Pa⋅s
-    real_t heatCapacity_{1};        // Specific heat capacity in J/(kg⋅K)
-    real_t thermalDiffusivity_{1};  // Unit: m²/s
-  
-    // Multipatch object
-    gsMultiPatch<> mpPde;
-  
-    // Indicator if input file has analytical solution(s)
-    bool hasVelocitySolution{false}, hasPressureSolution{false};
-  
-    // Analytical solutions to velocity and pressure
-    gsFunctionExpr<> velocityAnalyticalSolution{}, pressureAnalyticalSolution{};
-  
-    // Boundary conditions
-    gsBoundaryConditions<> bcInfo;
-    gsBoundaryConditions<> temperatureBcInfo;
-  
-    // Source function (for Stokes assembler)
-    gsFunctionExpr<> fSource;
+private:
+#ifdef PYGADJOINTS_USE_OPENMP
+  int n_omp_threads{1};
+#endif
+  // Fluid parameters
+  real_t density_{1};            // Unit: kg/m³
+  real_t viscosity_{1};          // Dynamic viscosity in Pa⋅s
+  real_t heatCapacity_{1};       // Specific heat capacity in J/(kg⋅K)
+  real_t thermalDiffusivity_{1}; // Unit: m²/s
 
-    // Functions for the convection-diffusion equation
-    gsFunctionExpr<> coeffDiffusion, coeffReaction, cdrRhs;
-  
-    // Number of refinements in the current iteration
-    int n_refinements{};
-  
-    // Number of degree elevations
-    int n_degree_elevations{};
-  
-    // Dimension of the physical space
-    int dimensionality_{};
-  
-    // Equal order discretization bases
-    bool equalOrderBases{false};
-  
-    // Navier-Stokes PDE object
-    std::shared_ptr<gsNavStokesPde<real_t>> pNSPde{nullptr};
-  
-    // Parameters for the flow solver
-    std::shared_ptr<gsFlowSolverParams<real_t>> pFlowParams{nullptr};
-  
-    // Solver option list
-    gsOptionList solveOpt;
-  
-    // Fluid solver
-    std::shared_ptr<gsINSSolverSteady<real_t, ColMajor>> pNSSolver{nullptr};
+  // Multipatch object
+  gsMultiPatch<> mpPde;
 
-    // Heat problem PDE
-    std::shared_ptr<gsConvDiffRePde<real_t>> pHeatPde{nullptr};
-  
-    // Function basis for temperature
-    gsMultiBasis<> functionBasisTemperature;
+  // Indicator if input file has analytical solution(s)
+  bool hasVelocitySolution{false}, hasPressureSolution{false};
 
-    // Heat problem assembler
-    std::shared_ptr<gsCDRAssembler<real_t>> pHeatAssembler{nullptr};
+  // Analytical solutions to velocity and pressure
+  gsFunctionExpr<> velocityAnalyticalSolution{}, pressureAnalyticalSolution{};
 
-    // Heat problem linear system solver
-    gsSparseSolver<>::BiCGSTABILUT heatSolver;
+  // Boundary conditions
+  gsBoundaryConditions<> bcInfo;
+  gsBoundaryConditions<> temperatureBcInfo;
 
-    // Heat problem solution vector
-    gsMatrix<> heatSolutionVector;
-  
-    // // Discretization spaces
-    // std::shared_ptr<space> pVelocity_space{nullptr}, pPressure_space{nullptr};
-  
-    // // Partial solution values/expression for the variables
-    // std::shared_ptr<solution> pVelocity_solution{nullptr},
-    //     pPressure_solution{nullptr};
-  
-    // std::vector<int> objective_functions_selected{};
+  // Source function (for Stokes assembler)
+  gsFunctionExpr<> fSource;
+
+  // Functions for the convection-diffusion equation
+  gsFunctionExpr<> coeffDiffusion, coeffReaction, cdrRhs;
+
+  // Number of refinements in the current iteration
+  int n_refinements{};
+
+  // Number of degree elevations
+  int n_degree_elevations{};
+
+  // Dimension of the physical space
+  int dimensionality_{};
+
+  // Equal order discretization bases
+  bool equalOrderBases{false};
+
+  // Navier-Stokes PDE object
+  std::shared_ptr<gsNavStokesPde<real_t>> pNSPde{nullptr};
+
+  // Parameters for the flow solver
+  std::shared_ptr<gsFlowSolverParams<real_t>> pFlowParams{nullptr};
+
+  // Solver option list
+  gsOptionList solveOpt;
+
+  // Fluid solver
+  std::shared_ptr<gsINSSolverSteady<real_t, ColMajor>> pNSSolver{nullptr};
+
+  // Heat problem PDE
+  std::shared_ptr<gsConvDiffRePde<real_t>> pHeatPde{nullptr};
+
+  // Function basis for temperature
+  gsMultiBasis<> functionBasisTemperature;
+
+  // Heat problem assembler
+  std::shared_ptr<gsCDRAssembler<real_t>> pHeatAssembler{nullptr};
+
+  // Heat problem linear system solver
+  gsSparseSolver<>::BiCGSTABILUT heatSolver;
+
+  // Heat problem solution vector
+  gsMatrix<> heatSolutionVector;
+
+  // Assembly options list
+  gsOptionList assemblyOptions;
+
+  // Auxiliary variables for objective function computation
+  gsQuadRule<>::uPtr QuRuleBoundary, QuRulePatch;
+  gsVector<> quWeightsBoundary, quWeightsPatch;
+  // gsMapData<> mdBoundary(NEED_MEASURE), mdPatch(NEED_MEASURE);
+  gsMatrix<> basisValues;
+
+  // // Discretization spaces
+  // std::shared_ptr<space> pVelocity_space{nullptr}, pPressure_space{nullptr};
+
+  // // Partial solution values/expression for the variables
+  // std::shared_ptr<solution> pVelocity_solution{nullptr},
+  //     pPressure_solution{nullptr};
+
+  std::vector<int> objective_functions_selected{};
+
 public:
   /// @brief Constructor
   StokesTemperatureProblem() {
@@ -125,7 +135,7 @@ public:
   void SetNumberOfThreads(const int &n_threads) {
     n_omp_threads = n_threads;
     omp_set_num_threads(n_threads);
-}
+  }
 #endif
 
   /// @brief Set up material constants
@@ -157,12 +167,13 @@ public:
   /// spaces
   void Init(const std::string &filename, const int numberOfRefinements,
             const int numberDegreeElevations, const bool useDirectSolver = true,
-            const bool useEqualOrderBases = false, const bool printSummary = false);
+            const bool useEqualOrderBases = false,
+            const bool printSummary = false);
 
   /// @brief Assemble the system matrix and rhs of the Stokes equation
   void AssembleFluidProblem();
 
-  /// @brief Asemble the system matrix and rhs for the heat problem
+  /// @brief Assemble the system matrix and rhs for the heat problem
   void AssembleHeatProblem();
 
   /// @brief Solve linear system of Stokes' system matrix and rhs
@@ -178,9 +189,11 @@ public:
   /// @param export_b64 If true, export values in 64-bit binary format
   void ExportParaview(const std::string &fname, const int &sampleRate);
 
-  // void AddObjectiveFunction(const int objective_function_selector);
+  /// @brief Add index of which objective function to compute
+  /// @param objective_function_selector
+  void AddObjectiveFunction(const int objective_function_selector);
 
-  // std::vector<double> ComputeObjectiveFunctionValues();
+  std::vector<real_t> ComputeObjectiveFunctionValues();
 
   // // Compute the outflow via surface integral of x-velocity
   // double ComputeOutflow();

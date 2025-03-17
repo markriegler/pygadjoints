@@ -18,18 +18,18 @@ void add_stokes_temperature_problem(py::module_ &m) {
            arg("viscosity"), arg("density"), arg("heat_capacity"),
            arg("thermal_diffusivity"))
       .def("export_paraview", &stokes::ExportParaview, arg("filename"),
-                              arg("sample_rate"))
-  //     .def("export_xml", &stokes::ExportXML, arg("fname"))
+           arg("sample_rate"))
+      //     .def("export_xml", &stokes::ExportXML, arg("fname"))
       .def("assemble_fluid_problem", &stokes::AssembleFluidProblem)
       .def("solve_fluid_linear_system", &stokes::SolveFluidLinearSystem)
       .def("assemble_heat_problem", &stokes::AssembleHeatProblem)
       .def("solve_heat_linear_system", &stokes::SolveHeatLinearSystem)
-  //     .def("update_geometry", &stokes::UpdateGeometry, arg("fname"),
-  //          arg("topology_changes"))
-  //     .def("add_objective_function", &stokes::AddObjectiveFunction,
-  //          arg("objective_function"))
-  //     .def("compute_objective_function_values",
-  //          &stokes::ComputeObjectiveFunctionValues)
+      //     .def("update_geometry", &stokes::UpdateGeometry, arg("fname"),
+      //          arg("topology_changes"))
+      .def("add_objective_function", &stokes::AddObjectiveFunction,
+           arg("objective_function"))
+      .def("compute_objective_function_values",
+           &stokes::ComputeObjectiveFunctionValues)
   //     .def("compute_outflow", &stokes::ComputeOutflow)
   //     .def("compute_vel_divergence", &stokes::ComputeVelDivergence)
   //     .def("h_refine", &stokes::HRefine)
@@ -48,16 +48,18 @@ namespace pygadjoints {
 void StokesTemperatureProblem::ReadInputFromFile(const std::string &filename) {
   const Timer timer("ReadInputFromFile");
   // IDs in the xml input file (might change later)
-  const index_t mpId{0}, fluidBcId{1},
-                assembly_options_id{10},
-                velocityAnalyticalId{12}, pressureAnalyticalId{13},
-                temperatureBcId{66}, sourceFunctionId{100};
+  const index_t mpId{0}, fluidBcId{1}, assemblyOptionsId{10},
+      velocityAnalyticalId{12}, pressureAnalyticalId{13}, temperatureBcId{66},
+      sourceFunctionId{100};
 
   // Import mesh and relevant information
   gsFileData<> fd(filename);
   fd.getId(mpId, mpPde);
 
   dimensionality_ = mpPde.geoDim();
+
+  // Read assembly options
+  fd.getId(assemblyOptionsId, assemblyOptions);
 
   // Read boundary conditions for fluid velocity (id 0) and pressure (id 1)
   fd.getId(fluidBcId, bcInfo);
@@ -99,7 +101,8 @@ void StokesTemperatureProblem::Init(const std::string &filename,
   functionBasisTemperature = gsMultiBasis<>(mpPde);
   // Elevate degree
   basis.setDegree(basis.maxCwiseDegree() + numberDegreeElevations);
-  functionBasisTemperature.setDegree(basis.maxCwiseDegree() + numberDegreeElevations);
+  functionBasisTemperature.setDegree(basis.maxCwiseDegree() +
+                                     numberDegreeElevations);
   // h-refinement
   for (int r = 0; r < numberOfRefinements; ++r) {
     basis.uniformRefine();
@@ -107,27 +110,29 @@ void StokesTemperatureProblem::Init(const std::string &filename,
   }
   // Create bases for velocity and pressure
   std::vector<gsMultiBasis<>> discreteBases{basis, basis};
-  // Elevate degree of velocity if not using equal order bases -> Taylor-Hood elements
+  // Elevate degree of velocity if not using equal order bases -> Taylor-Hood
+  // elements
   if (!useEqualOrderBases) {
     discreteBases[0].degreeElevate(1);
   }
 
   // Initialize Navier-Stokes PDE object
-  pNSPde = std::make_shared<gsNavStokesPde<real_t>>(mpPde, bcInfo, &fSource, viscosity_);
-  pFlowParams = std::make_shared<gsFlowSolverParams<real_t>>(*pNSPde, discreteBases);
+  pNSPde = std::make_shared<gsNavStokesPde<real_t>>(mpPde, bcInfo, &fSource,
+                                                    viscosity_);
+  pFlowParams =
+      std::make_shared<gsFlowSolverParams<real_t>>(*pNSPde, discreteBases);
   pFlowParams->options().setSwitch("quiet", printSummary);
   // TODO: for now element by element assembly. Maybe in future make user decide
   pFlowParams->options().setString("assemb.loop", "EbE");
 
   solveOpt.addInt("geo", "", 0);
-  
+
   solveOpt.addInt("plotPts", "", 10000);
   // solveOpt.addInt("animStep", "", animStep);
   solveOpt.addReal("tol", "", 1e-5);
   solveOpt.addSwitch("plot", "", true);
   solveOpt.addSwitch("plotMesh", "", false);
   solveOpt.addString("id", "", "");
-
 
   // Steady without any iterations
   if (useDirectSolver) {
@@ -141,16 +146,17 @@ void StokesTemperatureProblem::Init(const std::string &filename,
     pFlowParams->options().setReal("lin.tol", 1e-6);
     pFlowParams->options().setString("lin.precType", "MSIMPLER_FdiagEqual");
   }
-  
+
   // Initialize fluid solver
-  pNSSolver = std::make_shared<gsINSSolverSteady<real_t, ColMajor>>(pFlowParams);
+  pNSSolver =
+      std::make_shared<gsINSSolverSteady<real_t, ColMajor>>(pFlowParams);
 
   // Prepare heat problem
   // Define diffusion term
   std::vector<std::string> diffusionTermStrings;
   for (int i = 0; i < dimensionality_; ++i) {
     for (int j = 0; j < dimensionality_; ++j) {
-      // Fill diagnoal with thermal diffusivity value
+      // Fill diagonal with thermal diffusivity value
       if (i == j) {
         diffusionTermStrings.push_back(std::to_string(thermalDiffusivity_));
       } else {
@@ -180,16 +186,18 @@ void StokesTemperatureProblem::SolveFluidLinearSystem() {
 
 void StokesTemperatureProblem::AssembleHeatProblem() {
   const Timer timer("AssembleHeatProblem");
-  
+
   // Get velocity field, TODO: make this a variable and update it
   gsField<> velocityField = pNSSolver->constructSolution(0);
-  const gsFunctionSet<>& velocityFieldSet = velocityField.fields();
+  const gsFunctionSet<> &velocityFieldSet = velocityField.fields();
 
-  pHeatPde = std::make_shared<gsConvDiffRePde<real_t>>(mpPde, temperatureBcInfo,
-                &coeffDiffusion, &velocityFieldSet, &coeffReaction, &cdrRhs);
+  pHeatPde = std::make_shared<gsConvDiffRePde<real_t>>(
+      mpPde, temperatureBcInfo, &coeffDiffusion, &velocityFieldSet,
+      &coeffReaction, &cdrRhs);
 
   // Define assembler, TODO: define before and just assemble here
-  pHeatAssembler = std::make_shared<gsCDRAssembler<real_t>>(*pHeatPde, functionBasisTemperature);
+  pHeatAssembler = std::make_shared<gsCDRAssembler<real_t>>(
+      *pHeatPde, functionBasisTemperature);
   pHeatAssembler->options().setInt("Stabilization", stabilizerCDR::SUPG);
   pHeatAssembler->options().setInt("DirichletValues", dirichlet::l2Projection);
 
@@ -198,23 +206,105 @@ void StokesTemperatureProblem::AssembleHeatProblem() {
 
 void StokesTemperatureProblem::SolveHeatLinearSystem() {
   const Timer timer("SolveHeatLinearSystem");
-  
+
   heatSolver.compute(pHeatAssembler->matrix());
   heatSolutionVector = heatSolver.solve(pHeatAssembler->rhs());
 }
 
-void StokesTemperatureProblem::ExportParaview(const std::string& fname, const int &sampleRate) {
+void StokesTemperatureProblem::ExportParaview(const std::string &fname,
+                                              const int &sampleRate) {
   const Timer timer("ExportParaview");
-  
+
   gsField<> velocityField = pNSSolver->constructSolution(0);
   gsField<> pressureField = pNSSolver->constructSolution(1);
 
-  gsWriteParaview<>(velocityField, fname+"_velocity", sampleRate);
-  gsWriteParaview<>(pressureField, fname+"_pressure", sampleRate);
+  gsWriteParaview<>(velocityField, fname + "_velocity", sampleRate);
+  gsWriteParaview<>(pressureField, fname + "_pressure", sampleRate);
 
   // Heat problem
-  gsField<> temperatureField = pHeatAssembler->constructSolution(heatSolutionVector);
-  gsWriteParaview<>(temperatureField, fname+"_temperature", sampleRate);
+  gsField<> temperatureField =
+      pHeatAssembler->constructSolution(heatSolutionVector);
+  gsWriteParaview<>(temperatureField, fname + "_temperature", sampleRate);
 }
 
-}// namespace pygadjoints
+void StokesTemperatureProblem::AddObjectiveFunction(
+    const int objective_function_selector) {
+  objective_functions_selected.push_back(objective_function_selector);
+}
+
+std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
+  const Timer timer("ComputeObjectiveFunction");
+
+  real_t objective_value;
+  std::vector<real_t> objective_function_values;
+
+  gsMapData<> mdBoundary(NEED_MEASURE), mdPatch(NEED_MEASURE);
+
+  // Prepare quadrature
+  const gsINSAssembler<real_t, ColMajor> *fluidAssembler =
+      pNSSolver->getAssembler();
+
+  gsField<> velocityField = pNSSolver->constructSolution(0);
+  gsField<> pressureField = pNSSolver->constructSolution(1);
+
+  for (auto &objective_function_index : objective_functions_selected) {
+    objective_value = 0.0;
+
+    if (objective_function_index == 1) {
+      // Go through every boundary
+      for (gsMultiPatch<>::const_biterator bit = mpPde.bBegin();
+           bit != mpPde.bEnd(); ++bit) {
+        // Only compute for outlet boundary
+        if (bit->label() != "BID2") {
+          continue;
+        }
+        const gsGeometry<> &patch = mpPde[bit->patch];
+        // Get basis for pressure (patch and boundary side)
+        gsBasis<> &pressureBasis = pFlowParams->getBases()[1].basis(bit->patch);
+        typename gsBasis<>::uPtr pressureBoundaryBasis =
+            pressureBasis.boundaryBasis(bit->side());
+        // Get quadrature rules
+        QuRuleBoundary =
+            gsQuadrature::getPtr(*pressureBoundaryBasis, assemblyOptions);
+        QuRulePatch = gsQuadrature::getPtr(pressureBasis, assemblyOptions);
+        // Iterators over sides of boundary element patches
+        typename gsBasis<>::domainIter boundaryElementIt =
+            pressureBoundaryBasis->domain()->beginAll();
+        typename gsBasis<>::domainIter boundaryElementItEnd =
+            pressureBoundaryBasis->domain()->endAll();
+        // Iterator over patches of boundary elements
+        typename gsBasis<>::domainIter boundaryPatchIt =
+            pressureBasis.domain()->beginBdr(bit->side());
+        // Get boundary side basis
+        typename gsGeometry<>::uPtr pBoundary = patch.boundary(bit->side());
+        for (; boundaryElementIt < boundaryElementItEnd; ++boundaryElementIt) {
+          // Map quadrature to corresponding patch (side)
+          QuRuleBoundary->mapTo(boundaryElementIt.lowerCorner(),
+                                boundaryElementIt.upperCorner(),
+                                mdBoundary.points, quWeightsBoundary);
+          QuRulePatch->mapTo(boundaryPatchIt.lowerCorner(),
+                             boundaryPatchIt.upperCorner(), mdPatch.points,
+                             quWeightsPatch);
+          // Compute mapping for boundary;s side
+          pBoundary->computeMap(mdBoundary);
+          // Get values at boundary's patch
+          basisValues = pressureField.value(mdPatch.points, bit->patch);
+          // Perform numerical integration
+          for (index_t k = 0; k != mdBoundary.points.cols(); ++k) {
+            objective_value +=
+                quWeightsBoundary[k] * mdBoundary.measure(k) * basisValues(k);
+          }
+          // Update boundary patch iterator
+          ++boundaryPatchIt;
+        }
+      }
+    } else {
+      throw std::runtime_error("Objective function not known!\n");
+    }
+    objective_function_values.push_back(objective_value);
+  }
+
+  return objective_function_values;
+}
+
+} // namespace pygadjoints
