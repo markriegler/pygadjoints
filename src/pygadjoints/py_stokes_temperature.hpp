@@ -185,6 +185,9 @@ public:
 
   std::vector<real_t> ComputeObjectiveFunctionValues();
 
+  /// @brief Update the geometry
+  void UpdateGeometry(const std::string &fname, const bool &topology_changes);
+
   // // Compute the outflow via surface integral of x-velocity
   // double ComputeOutflow();
 

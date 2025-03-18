@@ -28,13 +28,12 @@ VISCOSITY = 6000  # Approximated by looking at https://www.ptonline.com/blog/pos
 HEAT_CAPACITY = 2900
 THERMAL_DIFFUSIVITY = 1.1997e-7
 
-# Simulation parameters
+# Simulation refinements (0,0 and 0,2 work best)
 N_REFINEMENTS = 0
 DEGREE_ELEVATIONS = 0
 
 
 if __name__ == "__main__":
-
     # -------------------------- STOKES SIMULATION -----------------------------
     stokes = pygadjoints.StokesTemperatureProblem()
     stokes.set_number_of_threads(nthreads=N_THREADS)
@@ -67,5 +66,5 @@ if __name__ == "__main__":
     # Write to ParaView file
     stokes.export_paraview(
         filename="ParaviewOutput/gsif_static_mixer_solution",
-        sample_rate=int(64**2),
+        sample_rate=int(16**2),
     )

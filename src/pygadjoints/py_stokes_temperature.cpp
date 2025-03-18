@@ -24,8 +24,8 @@ void add_stokes_temperature_problem(py::module_ &m) {
       .def("solve_fluid_linear_system", &stokes::SolveFluidLinearSystem)
       .def("assemble_heat_problem", &stokes::AssembleHeatProblem)
       .def("solve_heat_linear_system", &stokes::SolveHeatLinearSystem)
-      //     .def("update_geometry", &stokes::UpdateGeometry, arg("fname"),
-      //          arg("topology_changes"))
+      .def("update_geometry", &stokes::UpdateGeometry, arg("fname"),
+           arg("topology_changes"))
       .def("add_objective_function", &stokes::AddObjectiveFunction,
            arg("objective_function"))
       .def("compute_objective_function_values",
@@ -103,17 +103,19 @@ void StokesTemperatureProblem::Init(const std::string &filename,
   basis.setDegree(basis.maxCwiseDegree() + numberDegreeElevations);
   functionBasisTemperature.setDegree(basis.maxCwiseDegree() +
                                      numberDegreeElevations);
-  // h-refinement
-  for (int r = 0; r < numberOfRefinements; ++r) {
-    basis.uniformRefine();
-    functionBasisTemperature.uniformRefine();
-  }
   // Create bases for velocity and pressure
   std::vector<gsMultiBasis<>> discreteBases{basis, basis};
   // Elevate degree of velocity if not using equal order bases -> Taylor-Hood
   // elements
   if (!useEqualOrderBases) {
     discreteBases[0].degreeElevate(1);
+    functionBasisTemperature.degreeElevate(1);
+  }
+  // h-refinement
+  for (int r = 0; r < numberOfRefinements; ++r) {
+    discreteBases[0].uniformRefine();
+    discreteBases[1].uniformRefine();
+    functionBasisTemperature.uniformRefine();
   }
 
   // Initialize Navier-Stokes PDE object
@@ -250,7 +252,8 @@ std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
 
   gsField<> velocityField = pNSSolver->constructSolution(0);
   gsField<> pressureField = pNSSolver->constructSolution(1);
-  gsField<> temperatureField = pHeatAssembler->constructSolution(heatSolutionVector);
+  gsField<> temperatureField =
+      pHeatAssembler->constructSolution(heatSolutionVector);
 
   for (auto &objective_function_index : objective_functions_selected) {
     objective_value = 0.0;
@@ -322,8 +325,10 @@ std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
         }
         const gsGeometry<> &patch = mpPde[bit->patch];
         // Get basis for pressure (patch and boundary side)
-        const gsBasis<> &temperatureBasis = functionBasisTemperature.basis(bit->patch);
-        typename gsBasis<>::uPtr temperatureBoundaryBasis = temperatureBasis.boundaryBasis(bit->side());
+        const gsBasis<> &temperatureBasis =
+            functionBasisTemperature.basis(bit->patch);
+        typename gsBasis<>::uPtr temperatureBoundaryBasis =
+            temperatureBasis.boundaryBasis(bit->side());
         // Get quadrature rules
         QuRuleBoundary =
             gsQuadrature::getPtr(*temperatureBoundaryBasis, assemblyOptions);
@@ -383,6 +388,55 @@ std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
   }
 
   return objective_function_values;
+}
+
+void StokesTemperatureProblem::UpdateGeometry(const std::string &fname,
+                                              const bool &topology_changes) {
+  const Timer timer("UpdateGeometry");
+  if (topology_changes) {
+    throw std::runtime_error("Not Implemented!");
+  }
+
+  // Import mesh and load relevant information
+  gsMultiPatch<> mpNew;
+
+  gsFileData<> fd(fname);
+  fd.getId(0, mpNew);
+
+  // This update does not require refinement or elevation, in theory the mp is
+  // not touched, only the solution field
+  size_t n_patches_new, n_patches_old;
+  n_patches_new = mpNew.nPatches();
+  n_patches_old = mpPde.nPatches();
+
+  // Ignore all other information!
+  if (n_patches_new != n_patches_old) {
+    throw std::runtime_error(
+        "This does not work - I am fucked. Expected number of "
+        "patches " +
+        std::to_string(n_patches_old) + ", but got " +
+        std::to_string(n_patches_new));
+  }
+  // Manually update coefficients as to not overwrite any precomputed
+  // values
+  size_t n_new_coefs, n_old_coefs;
+
+  for (size_t patch_id{}; patch_id < n_patches_new; patch_id++) {
+    n_new_coefs = mpNew.patch(patch_id).coefs().size();
+    n_old_coefs = mpPde.patch(patch_id).coefs().size();
+    if (n_new_coefs != n_old_coefs) {
+      throw std::runtime_error(
+          "This does not work - I am fucked. Expected number of "
+          "coefficients " +
+          std::to_string(n_old_coefs) + ", but got " +
+          std::to_string(n_new_coefs));
+    }
+    for (size_t i_coef = 0; i_coef != n_old_coefs; i_coef++) {
+      mpPde.patch(patch_id).coefs().at(i_coef) =
+          mpNew.patch(patch_id).coefs().at(i_coef);
+    }
+  }
+  // pGeometry_expression->copyCoefs(mpNew);
 }
 
 } // namespace pygadjoints
