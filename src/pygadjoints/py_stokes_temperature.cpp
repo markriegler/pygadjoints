@@ -67,10 +67,11 @@ void StokesTemperatureProblem::ReadInputFromFile(const std::string &filename) {
 
   // Set source term to zero if not given, otherwise read from file
   if (fd.hasId(sourceFunctionId)) {
-    gsFunctionExpr<> sourceTerm("0", dimensionality_);
-    fSource = sourceTerm;
-  } else {
     fd.getId(sourceFunctionId, fSource);
+  } else {
+    std::vector<std::string> zeros(dimensionality_, "0.0");
+    gsFunctionExpr<> sourceTerm(zeros, dimensionality_);
+    fSource = sourceTerm;
   }
 
   // Check if file has analytical solution for velocity and pressure
@@ -178,7 +179,9 @@ void StokesTemperatureProblem::Init(const std::string &filename,
 
 void StokesTemperatureProblem::AssembleFluidProblem() {
   const Timer timer("AssembleFluidProblem");
-  pNSSolver->initialize();
+  if (!pNSSolver->getAssembler()->isInitialized()) {
+    pNSSolver->initialize();
+  }
 }
 
 void StokesTemperatureProblem::SolveFluidLinearSystem() {
@@ -224,9 +227,11 @@ void StokesTemperatureProblem::ExportParaview(const std::string &fname,
   gsWriteParaview<>(pressureField, fname + "_pressure", sampleRate);
 
   // Heat problem
-  gsField<> temperatureField =
-      pHeatAssembler->constructSolution(heatSolutionVector);
-  gsWriteParaview<>(temperatureField, fname + "_temperature", sampleRate);
+  if (pHeatAssembler) {
+    gsField<> temperatureField =
+        pHeatAssembler->constructSolution(heatSolutionVector);
+    gsWriteParaview<>(temperatureField, fname + "_temperature", sampleRate);
+  }
 }
 
 void StokesTemperatureProblem::AddObjectiveFunction(
@@ -252,8 +257,6 @@ std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
 
   gsField<> velocityField = pNSSolver->constructSolution(0);
   gsField<> pressureField = pNSSolver->constructSolution(1);
-  gsField<> temperatureField =
-      pHeatAssembler->constructSolution(heatSolutionVector);
 
   for (auto &objective_function_index : objective_functions_selected) {
     objective_value = 0.0;
@@ -316,6 +319,8 @@ std::vector<real_t> StokesTemperatureProblem::ComputeObjectiveFunctionValues() {
       }
       // Length computation
     } else if (objective_function_index == 2) {
+      gsField<> temperatureField =
+          pHeatAssembler->constructSolution(heatSolutionVector);
       std::vector<real_t> quadratureWeights, basisValuesList;
       for (gsMultiPatch<>::const_biterator bit = mpPde.bBegin();
            bit != mpPde.bEnd(); ++bit) {
@@ -434,6 +439,12 @@ void StokesTemperatureProblem::UpdateGeometry(const std::string &fname,
     for (size_t i_coef = 0; i_coef != n_old_coefs; i_coef++) {
       mpPde.patch(patch_id).coefs().at(i_coef) =
           mpNew.patch(patch_id).coefs().at(i_coef);
+      pNSPde->domain().patch(patch_id).coefs().at(i_coef) =
+          mpNew.patch(patch_id).coefs().at(i_coef);
+      if (pHeatPde) {
+        pHeatPde->domain().patch(patch_id).coefs().at(i_coef) =
+            mpNew.patch(patch_id).coefs().at(i_coef);
+      }
     }
   }
   // pGeometry_expression->copyCoefs(mpNew);

@@ -1,3 +1,5 @@
+#pragma once
+
 #include <chrono>
 #include <gismo.h>
 #include <pybind11/numpy.h>
