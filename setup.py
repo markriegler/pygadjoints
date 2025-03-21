@@ -4,6 +4,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Parse debug mode before setuptools; otherwise error
+global debug_mode
+debug_mode = False
+if "--debug" in sys.argv:
+    debug_mode = True
+    sys.argv.remove("--debug")
+
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 
@@ -44,15 +51,11 @@ class CMakeBuild(build_ext):
 
         # Using this requires trailing slash for auto-detection & inclusion of
         # auxiliary "native" libs
+        global debug_mode
+        if "DEBUG" in os.environ:
+            debug_mode = os.environ["DEBUG"] == "1"
 
-        debug = (
-            int(os.environ.get("DEBUG", 0))
-            if self.debug is None
-            else self.debug
-        )
-        # overwrite if ext.debug exists
-        debug = ext.debug if hasattr(ext, "debug") else debug
-        cfg = "Debug" if debug else "Release"
+        cfg = "Debug" if debug_mode else "Release"
 
         # CMake lets you override the generator - we need to check this.
         # Can be set with Conda-Build, for example.
