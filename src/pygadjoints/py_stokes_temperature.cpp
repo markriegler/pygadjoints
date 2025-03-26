@@ -179,8 +179,12 @@ void StokesTemperatureProblem::Init(const std::string &filename,
 
 void StokesTemperatureProblem::AssembleFluidProblem() {
   const Timer timer("AssembleFluidProblem");
+  // In first iteration initialize assembler
   if (!pNSSolver->getAssembler()->isInitialized()) {
     pNSSolver->initialize();
+  } else {  // After first iteration
+    // Avoid creating another linear solver object
+    pNSSolver->getAssembler()->initialize();
   }
 }
 
