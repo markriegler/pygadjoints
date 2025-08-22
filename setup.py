@@ -188,7 +188,7 @@ setup(
         "Natural Language :: English",
         "Topic :: Scientific/Engineering",
     ],
-    ext_modules=[CMakeExtension("pygadjoints")],
+    ext_modules=[CMakeExtension("pygadjoints", sourcedir=".")],
     cmdclass=dict(build_ext=CMakeBuild),
     zip_safe=False,
 )
