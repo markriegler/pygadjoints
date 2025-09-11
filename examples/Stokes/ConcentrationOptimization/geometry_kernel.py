@@ -8,13 +8,15 @@ EPS = 1e-8
 BOX_LENGTH = 0.14
 BOX_HEIGHT = 0.04
 
-TILING = [3, 3, 6]
+TILING = [2,2, 6]
 TWISTING_LAYERS = [2, 3]
 # How much percent of tile length should be reserved for linking tiles
 LINKAGE_THICKNESS = 0.1
 # How much percent of box length should be reserved for forerun (the same length will
 # be applied for the afterrun)
 FORERUN_AFTERRUN_THICKNESS = 0.5
+# Determines the percentage of the whole forerun length to be dedicated to the linkage
+FORERUN_AFTERRUN_LINKAGE_LENGTH = 0.1
 INLET_BOUNDARY_ID = 2
 OUTLET_BOUNDARY_ID = 3
 
@@ -203,6 +205,71 @@ class SMXKernel:
                 tile_patches.append(new_patch)
 
             all_patches += tile_patches
+            
+        # Start with the fore and afterrun
+        forerun_length = FORERUN_AFTERRUN_THICKNESS * BOX_LENGTH
+        forerun_linkage_length = forerun_length * FORERUN_AFTERRUN_LINKAGE_LENGTH
+        forerun_z_points = np.array([-forerun_length, -forerun_length/2, -forerun_linkage_length])
+        afterrun_z_points = BOX_LENGTH - np.flip(forerun_z_points)
+        
+        dummy_box = sp.helpme.create.box(1,1,1)
+        
+        # inlet_xy_points = self._macro_spline_initial.evaluate(self._parametric_grid_points[:layer_npoints])
+        x_points_para = np.linspace(0, 1, self._tiling[0]+1)
+        y_points_para = np.linspace(0, 1, self._tiling[1]+1)
+        xy_parametric_grid_evaluation_points = _cartesian_product([
+            x_points_para[:-1],
+            y_points_para[:-1],
+            np.array([0.0, 1.0])
+        ])
+        xy_box_points = self._macro_spline_initial.evaluate(xy_parametric_grid_evaluation_points)
+        forerun_start_xy_points, afterrun_start_xy_points = np.split(xy_box_points, 2, axis=0)
+        # Compute the length in x-directions for the inlet tiles
+        box_grid_points_parametric = _cartesian_product([
+            x_points_para,
+            y_points_para[:-1],
+            np.array([0.0, 1.0])
+        ])
+        all_box_grid_points = self._macro_spline_initial.evaluate(box_grid_points_parametric)
+        dx_box_points = [np.diff(points, axis=0)[:,0] for points in np.split(all_box_grid_points, 2*self._tiling[1], axis=0)]
+        forerun_dx, afterrun_dx = np.split(np.hstack(dx_box_points), 2)
+        # compute the length y-direction for the inlet tiles
+        box_grid_points_parametric = _cartesian_product([
+            x_points_para[:-1],
+            y_points_para,
+            np.array([0.0, 1.0])
+        ])
+        all_box_grid_points = self._macro_spline_initial.evaluate(box_grid_points_parametric)
+        # Reorder all rows such that the y-coordinate is the first ascending direction
+        reorder_indices = []
+        offset = 0
+        for grid_points in np.split(all_box_grid_points, 2, axis=0):
+            new_indices = np.concatenate([offset + np.arange(i, len(grid_points), self._tiling[0]) for i in range(self._tiling[0])])
+            reorder_indices.append(new_indices)
+            offset += (self._tiling[0]+1) * self._tiling[1]
+        all_box_grid_points = all_box_grid_points[np.hstack(reorder_indices)]
+        dy_box_points = [np.diff(points, axis=0)[:,1] for points in np.split(all_box_grid_points, 2*self._tiling[0], axis=0)]
+        forerun_dy, afterrun_dy = np.split(np.hstack(dy_box_points), 2)
+        forerun_dx_dy = np.column_stack([forerun_dx, forerun_dy])
+        afterrun_dx_dy = np.column_stack([afterrun_dx, afterrun_dy])
+        
+        # Create forerrun patches
+        for xy_start_point,dx_dy in zip(
+            forerun_start_xy_points,
+            forerun_dx_dy
+        ):
+            # Make 4 quarters of beam
+            quarter_start_points = _cartesian_product([
+                np.array([xy_start_point[0], xy_start_point[0]+dx_dy[0]/2]),
+                np.array([xy_start_point[1], xy_start_point[1]+dx_dy[1]/2])
+            ])
+            for z_start, dz in zip(forerun_z_points[:2], np.diff(forerun_z_points[:3])):
+                quarter_beam = sp.helpme.create.box(dx_dy[0]/2, dx_dy[1]/2, dz)
+                for quarter_start_point in quarter_start_points:
+                    new_patch = quarter_beam.copy()
+                    new_patch.cps += np.hstack((quarter_start_point, np.array([z_start])))
+                    all_patches.append(new_patch)
+        
 
         return sp.Multipatch(all_patches)
 
