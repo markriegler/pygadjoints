@@ -83,9 +83,9 @@ class SMXKernel:
         z_grid_points = np.cumsum(z_layer_length)
         z_grid_points /= z_grid_points[-1]
 
-        self._grid_points = [x_grid_points, y_grid_points, z_grid_points]
+        self._parametric_grid_points = [x_grid_points, y_grid_points, z_grid_points]
 
-        self._start_points = sp.utils.data.cartesian_product(
+        self._parametric_start_points = sp.utils.data.cartesian_product(
             [x_grid_points[:-1], y_grid_points[:-1], z_grid_points[:-1]]
         )
 
