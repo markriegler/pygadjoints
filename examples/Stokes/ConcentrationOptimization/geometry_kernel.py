@@ -1,15 +1,15 @@
 import numpy as np
 import splinepy as sp
+from scipy.interpolate import LinearNDInterpolator
 from splinepy.utils.data import cartesian_product as _cartesian_product
-
 from sulzer_inverse import SulzerSMXInverse
 
 EPS = 1e-8
 BOX_LENGTH = 0.14
 BOX_HEIGHT = 0.04
 
-TILING = [2, 2, 4]
-TWISTING_LAYERS = [2]
+TILING = [3, 3, 6]
+TWISTING_LAYERS = [2, 3]
 # How much percent of tile length should be reserved for linking tiles
 LINKAGE_THICKNESS = 0.1
 # How much percent of box length should be reserved for forerun (the same length will
@@ -150,29 +150,59 @@ class SMXKernel:
             self._parametric_grid_points
         )
         # start_grid_points_physical = grid_points_physical[self._tile_start_grid_indices])
-        
-        dummy_tile = sp.helpme.create.box(1,1,1)
+
+        dummy_tile = sp.helpme.create.box(1, 1, 1)
         tile_evaluation_points = SulzerSMXInverse._evaluation_points
-        
+
+        all_patches = []
+
+        # Auxiliary values for the linear interpolation
+        e = np.array([0, 1])
+        E = _cartesian_product([e, e, e])
+
         for tile_start_grid_index in self._tile_start_grid_indices:
             # Compute the tile's corner points in physical space
             tile_corner_points_indices = (
                 tile_point_indices_stencil + tile_start_grid_index
             )
-            tile_corner_points = grid_points_physical[
+            tile_corner_points_physical = grid_points_physical[
                 tile_corner_points_indices
             ]
             # Evaluate the parameters
-            tile_corner_points_parametric = self._parametric_grid_points[tile_corner_points_indices]
+            tile_corner_points_parametric = self._parametric_grid_points[
+                tile_corner_points_indices
+            ]
             # Get the evaluation points in the parametric domain of the parameter spline
             dummy_tile.cps = tile_corner_points_parametric
-            parameters_evaluation_points_parametric = dummy_tile.evaluate(tile_evaluation_points)
+            parameters_evaluation_points_parametric = dummy_tile.evaluate(
+                tile_evaluation_points
+            )
             # Evaluate parameter spline on tile
-            tile_parameters = parameter_spline_initial.evaluate(parameters_evaluation_points_parametric)
-            # Evaluate tile
-            tile_patches, _ = self._tile.create_tile(tile_parameters)
-            sp.Multipatch(tile_patches).show()
-            
+            tile_parameters = parameter_spline_initial.evaluate(
+                parameters_evaluation_points_parametric
+            )
+            # Evaluate tile in tile's parametric space
+            tile_patches_parametric, _ = self._tile.create_tile(
+                tile_parameters
+            )
+
+            tile_linear_interpolator = LinearNDInterpolator(
+                E, tile_corner_points_physical
+            )
+
+            # Trilinearly interpolate to fit physical domain
+            tile_patches = []
+            for patch_parametric in tile_patches_parametric:
+                new_patch = patch_parametric.copy()
+                new_cps = tile_linear_interpolator(patch_parametric.cps.copy())
+                new_patch.cps = new_cps
+                tile_patches.append(new_patch)
+
+            all_patches += tile_patches
+
+        abra = sp.Multipatch(all_patches)
+        abra.determine_interfaces()
+        abra.show(control_points=False, knots=False)
 
         raise ValueError()
 
