@@ -15,6 +15,8 @@ LINKAGE_THICKNESS = 0.1
 # How much percent of box length should be reserved for forerun (the same length will
 # be applied for the afterrun)
 FORERUN_AFTERRUN_THICKNESS = 0.5
+INLET_BOUNDARY_ID = 2
+OUTLET_BOUNDARY_ID = 3
 
 
 class SMXKernel:
@@ -29,6 +31,7 @@ class SMXKernel:
         forerun_thickness,
         parameter_spline_initial,
         macro_spline_initial,
+        boundary_identifier_dict=None,
     ):
         self._box_dimensions = box_dimensions
         self._tiling = tiling
@@ -39,6 +42,7 @@ class SMXKernel:
         self._parameter_spline_initial = parameter_spline_initial
         self._macro_spline_initial = macro_spline_initial
         self._tile = SulzerSMXInverse()
+        self.boundary_identifier_dict = boundary_identifier_dict
 
         self.interfaces = None
         self.multipatch = None
@@ -200,11 +204,7 @@ class SMXKernel:
 
             all_patches += tile_patches
 
-        abra = sp.Multipatch(all_patches)
-        abra.determine_interfaces()
-        abra.show(control_points=False, knots=False)
-
-        raise ValueError()
+        return sp.Multipatch(all_patches)
 
     def generate_microstructure(self, macro_sensitivities=None):
         # Generate the mixer
@@ -225,6 +225,9 @@ class SMXKernel:
             self.multipatch.boundary_from_function(
                 identifier_function, boundary_id=boundary_id
             )
+
+    def show_microstructure(self):
+        self.multipatch.show(control_points=False, knots=False)
 
 
 if __name__ == "__main__":
@@ -250,6 +253,18 @@ if __name__ == "__main__":
         ).reshape(-1, 1),
     )
 
+    # Declare identifier function for the inlet and outlet
+    def identifier_inlet(points):
+        return points[:, 2] < EPS
+
+    def identifier_outlet(points):
+        return points[:, 2] > BOX_LENGTH - EPS
+
+    boundary_identifier_dict = {
+        identifier_inlet: INLET_BOUNDARY_ID,
+        identifier_outlet: OUTLET_BOUNDARY_ID,
+    }
+
     geokernel = SMXKernel(
         box_dimensions=[BOX_HEIGHT, BOX_HEIGHT, BOX_LENGTH],
         tiling=TILING,
@@ -258,6 +273,9 @@ if __name__ == "__main__":
         forerun_thickness=FORERUN_AFTERRUN_THICKNESS,
         parameter_spline_initial=parameter_spline_initial,
         macro_spline_initial=macro_spline_initial,
+        boundary_identifier_dict=boundary_identifier_dict,
     )
 
     geokernel.generate_microstructure()
+
+    geokernel.show_microstructure()
