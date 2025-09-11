@@ -84,7 +84,8 @@ private:
   std::shared_ptr<gsCDRAssembler<real_t>> pHeatAssembler{nullptr};
 
   // Heat problem linear system solver
-  gsSparseSolver<>::BiCGSTABILUT heatSolver;
+  // gsSparseSolver<>::BiCGSTABILUT heatSolver;
+  gsSparseSolver<>::LU heatSolver;
 
   // Heat problem solution vector
   gsMatrix<> heatSolutionVector;
