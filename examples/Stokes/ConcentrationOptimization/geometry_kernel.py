@@ -1,0 +1,70 @@
+import numpy as np
+import splinepy as sp
+
+EPS = 1e-8
+BOX_LENGTH = 0.14
+BOX_HEIGHT = 0.04
+
+TILING = [2, 2, 4]
+TWISTING_LAYERS = [2, 3]
+# How much percent of tile length should be reserved for linking tiles
+LINKAGE_THICKNESS = 0.1
+# How much percent of box length should be reserved for forerun (the same length will be
+# applied for the afterrun)
+FORE_THICKNESS = 0.5
+
+
+class SMXKernel:
+    """Class to generate the 3D SMX mixer geometry"""
+
+    def __init__(
+        self,
+        box_dimensions,
+        tiling,
+        twisting_layers,
+        linkage_thickness,
+        forerun_thickness,
+        parameter_spline_initial,
+        macro_spline_initial,
+    ):
+        self._box_dimensions = box_dimensions
+        self._tiling = tiling
+        self._twisting_layers = twisting_layers
+        self._linkage_thickness = linkage_thickness
+        self._forerun_thickness = forerun_thickness
+        self._parameter_spline_initial = parameter_spline_initial
+        self._macro_spline_initial = macro_spline_initial
+
+
+if __name__ == "__main__":
+    # Create initial parameter spline with controls in the corners and one layer (of 4
+    # points) in the middle into the z-direction
+    macro_spline_initial = sp.BSpline(
+        degrees=[1, 1, 1],
+        knot_vectors=[[0, 0, 1, 1], [0, 0, 1, 1], [0, 0, 0.5, 1, 1]],
+        control_points=sp.utils.data.cartesian_product(
+            [
+                np.array([0, BOX_HEIGHT]),
+                np.array([0, BOX_HEIGHT]),
+                np.array([0, BOX_LENGTH / 2, BOX_LENGTH]),
+            ]
+        ),
+    )
+
+    parameter_spline_initial = sp.BSpline(
+        degrees=[1, 1, 1],
+        knot_vectors=macro_spline_initial.kvs,
+        control_points=np.array(
+            [0.1, 0.1, 0.1, 0.1, 0.4, 0.4, 0.4, 0.4, 0.2, 0.2, 0.2, 0.2]
+        ).reshape(-1, 1),
+    )
+
+    geokernel = SMXKernel(
+        box_dimensions=[BOX_HEIGHT, BOX_HEIGHT, BOX_LENGTH],
+        tiling=TILING,
+        twisting_layers=TWISTING_LAYERS,
+        linkage_thickness=LINKAGE_THICKNESS,
+        forerun_thickness=FORE_THICKNESS,
+        parameter_spline_initial=parameter_spline_initial,
+        macro_spline_initial=macro_spline_initial,
+    )
