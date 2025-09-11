@@ -55,21 +55,6 @@ class SMXKernel:
         domain."""
         self._determine_linkage_needs()
 
-        # Count the number of tiles in z-direction. The linkage will be added to
-        # accordingly
-        # n_tiles_in_z_direction = (
-        #     self._z_tiling
-        #     + self._linkage_thickness * np.sum(np.abs(self._linkage_array))
-        # )
-
-        # tiling_adjusted = self._tiling.copy()
-        # tiling_adjusted[-1] = n_tiles_in_z_direction
-
-        # # Determine the length of one tile in the parametric domain
-        # self._parametric_tile_dimensions = np.array([
-        #     1 / n_tiles for n_tiles in tiling_adjusted
-        # ])
-
         # Determine the starting points in x- and y-direction
         x_grid_points = np.linspace(0, 1, self._tiling[0] + 1)
         y_grid_points = np.linspace(0, 1, self._tiling[1] + 1)
