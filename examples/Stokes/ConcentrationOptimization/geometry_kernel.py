@@ -53,9 +53,41 @@ class SMXKernel:
     def _compute_parametric_starting_points(self):
         """Compute the starting points of the tiles and linkages in the parametric
         domain."""
-        np.ones(self._z_tiling)
-
         self._determine_linkage_needs()
+
+        # Count the number of tiles in z-direction. The linkage will be added to
+        # accordingly
+        # n_tiles_in_z_direction = (
+        #     self._z_tiling
+        #     + self._linkage_thickness * np.sum(np.abs(self._linkage_array))
+        # )
+
+        # tiling_adjusted = self._tiling.copy()
+        # tiling_adjusted[-1] = n_tiles_in_z_direction
+
+        # # Determine the length of one tile in the parametric domain
+        # self._parametric_tile_dimensions = np.array([
+        #     1 / n_tiles for n_tiles in tiling_adjusted
+        # ])
+
+        # Determine the starting points in x- and y-direction
+        x_grid_points = np.linspace(0, 1, self._tiling[0] + 1)
+        y_grid_points = np.linspace(0, 1, self._tiling[1] + 1)
+        # For the start points in z-direction also account for the linkages
+        z_layer_length = np.ones(2 * self._z_tiling - 1)
+        z_layer_length[1::2] = self._linkage_thickness * self._linkage_array
+        # Remove the zeros where no linkage is
+        z_layer_length = z_layer_length[z_layer_length != 0.0]
+        # Add zero for starting point at inlet
+        z_layer_length = np.insert(z_layer_length, 0, 0.0)
+        z_grid_points = np.cumsum(z_layer_length)
+        z_grid_points /= z_grid_points[-1]
+
+        self._grid_points = [x_grid_points, y_grid_points, z_grid_points]
+
+        self._start_points = sp.utils.data.cartesian_product(
+            [x_grid_points[:-1], y_grid_points[:-1], z_grid_points[:-1]]
+        )
 
 
 if __name__ == "__main__":
