@@ -9,8 +9,8 @@ TILING = [2, 2, 4]
 TWISTING_LAYERS = [2, 3]
 # How much percent of tile length should be reserved for linking tiles
 LINKAGE_THICKNESS = 0.1
-# How much percent of box length should be reserved for forerun (the same length will be
-# applied for the afterrun)
+# How much percent of box length should be reserved for forerun (the same length will
+# be applied for the afterrun)
 FORE_THICKNESS = 0.5
 
 
@@ -29,11 +29,33 @@ class SMXKernel:
     ):
         self._box_dimensions = box_dimensions
         self._tiling = tiling
+        self._z_tiling = tiling[-1]
         self._twisting_layers = twisting_layers
         self._linkage_thickness = linkage_thickness
         self._forerun_thickness = forerun_thickness
         self._parameter_spline_initial = parameter_spline_initial
         self._macro_spline_initial = macro_spline_initial
+
+        self._compute_parametric_starting_points()
+
+    def _determine_linkage_needs(self):
+        """Determine where linkages are needed. Saves them as an array of integers,
+        where these values are used:
+            -1: linkage from twisted to non-twisted layer
+            0: no linkage
+            1: linkage from non-twisted to twisted
+        """
+        # Create an array, where 0 says non-twisted layer and 1 twisted layer
+        twist_array = np.zeros(self._z_tiling)
+        twist_array[self._twisting_layers] = 1
+        self._linkage_array = twist_array[1:] - twist_array[:-1]
+
+    def _compute_parametric_starting_points(self):
+        """Compute the starting points of the tiles and linkages in the parametric
+        domain."""
+        np.ones(self._z_tiling)
+
+        self._determine_linkage_needs()
 
 
 if __name__ == "__main__":
