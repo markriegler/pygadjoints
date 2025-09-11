@@ -128,7 +128,8 @@ class SMXKernel:
         x_npoints = self._tiling[0] + 1
         y_npoints = self._tiling[1] + 1
         layer_npoints = x_npoints * y_npoints
-        tile_point_indices = np.array(
+        # Determine stencil of indices to which points belong to a tile
+        tile_point_indices_stencil = np.array(
             [
                 0,
                 1,
@@ -141,7 +142,20 @@ class SMXKernel:
             ]
         )
 
-        print(tile_point_indices)
+        # Determine the tiles' starting points in the physical domain
+        grid_points_physical = self._macro_spline_initial.evaluate(
+            self._parametric_grid_points
+        )
+        # start_grid_points_physical = grid_points_physical[self._tile_start_grid_indices])
+
+        for tile_start_grid_index in self._tile_start_grid_indices:
+            tile_corner_points_indices = (
+                tile_point_indices_stencil + tile_start_grid_index
+            )
+            tile_corner_points = grid_points_physical[
+                tile_corner_points_indices
+            ]
+            print(tile_corner_points)
 
         raise ValueError()
 
