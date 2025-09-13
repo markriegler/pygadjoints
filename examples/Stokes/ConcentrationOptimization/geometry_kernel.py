@@ -854,10 +854,6 @@ class SMXKernel:
                     _, new_x_points = compute_x_linkage_points(
                         grid_points[:, 0], parameters
                     )
-                    assert new_y_points.shape == (
-                        5,
-                        6,
-                    ), f"Different shape for y-points: {new_y_points.shape}"
 
                     z_grid_points = grid_points[:, 2].reshape(-1, x_npoints)
                     # Interleave tile-wise in x-direction
