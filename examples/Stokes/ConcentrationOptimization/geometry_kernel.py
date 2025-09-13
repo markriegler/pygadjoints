@@ -8,7 +8,7 @@ EPS = 1e-8
 BOX_LENGTH = 0.14
 BOX_HEIGHT = 0.04
 
-TILING = [2, 2, 6]
+TILING = [3, 3, 6]
 TWISTING_LAYERS = [2, 3]
 # How much percent of tile length should be reserved for linking tiles
 LINKAGE_THICKNESS = 0.1
@@ -330,6 +330,180 @@ class SMXKernel:
                     )
                     all_patches.append(new_patch)
 
+        # Create forerun linkage patches
+        linkage_evaluation_points_para = _cartesian_product(
+            [x_points_para, y_points_para, np.array([0.0, 1.0])]
+        )
+        # For nontwisted layer dy is needed; similarly dx is needed for twisted layer
+        xyz_points_linkage = self._macro_spline_initial.evaluate(
+            linkage_evaluation_points_para
+        )
+        # x-points are the tiles' x-points plus the points in the middle
+        x_points_linkage = np.split(xyz_points_linkage[:, 0], 2 * y_npoints)
+
+        def interleave_with_means(array):
+            n = len(array)
+            if array.ndim == 1:
+                result = np.empty(2 * n - 1, dtype=array.dtype)
+                # Place original values
+                result[0::2] = array
+                # Compute means for in-between positions
+                result[1::2] = (array[:-1] + array[1:]) / 2
+            else:
+                result = np.empty(
+                    (2 * n - 1, array.shape[1]), dtype=array.dtype
+                )
+                result[0::2, :] = array
+                result[1::2, :] = (array[:-1, :] + array[1:, :]) / 2
+
+            return result
+
+        # x points for linkage are the tile x-points + a point in the middle for
+        # each tile
+        for i in range(2 * y_npoints):
+            x_points_linkage[i] = interleave_with_means(x_points_linkage[i])
+        # In y-direction we also interleave the tiles in two
+        x_points_linkage_forerun = interleave_with_means(
+            np.vstack(x_points_linkage[:y_npoints])
+        )
+        x_points_linkage_afterrun = interleave_with_means(
+            np.vstack(x_points_linkage[y_npoints:])
+        )
+
+        # Points at tile interfaces have to be doubled
+        def double_interface_points(array):
+            x_indices = np.arange(len(array))
+            x_repeats = np.repeat(
+                x_indices, np.where(x_indices % 2 == 0, 2, 1)
+            )[1:-1]
+            return array[x_repeats, :]
+
+        x_points_linkage_forerun = double_interface_points(
+            x_points_linkage_forerun
+        )
+        x_points_linkage_afterrun = double_interface_points(
+            x_points_linkage_afterrun
+        )
+
+        # For the y-points also account for the tile parameters
+        # For every tile we have to account for the tile's y-coordinates
+        def compute_y_linkage_points(y_points, parameters):
+            unique_indices = np.arange(len(y_points))
+            row_indices = np.split(unique_indices, x_npoints)
+            # Only the middle row indices should be duplicated
+            duplicating_indices = np.hstack(
+                (
+                    row_indices[0],
+                    np.hstack(
+                        [np.tile(indices, 2) for indices in row_indices[1:-1]]
+                    ),
+                    row_indices[-1],
+                )
+            )
+            y_points_corners = y_points[duplicating_indices]
+            parameters_corners = parameters[duplicating_indices]
+            # Compute the dy values at the corners
+            dy_values = np.diff(
+                y_points[unique_indices].reshape(y_npoints, x_npoints), axis=0
+            )
+            dy_corner_values = np.repeat(dy_values, 2, axis=0).ravel()
+            y_shift_values = dy_corner_values * parameters_corners
+            # y-shift should be negative for upper edges of tiles
+            y_shift_values = y_shift_values.reshape(-1, x_npoints)
+            y_shift_values[1::2, :] *= -1.0
+            y_shift_values = y_shift_values.ravel()
+
+            y_points_corners += y_shift_values
+
+            # Interleave in x-direction
+            new_y_points = np.vstack(
+                [
+                    interleave_with_means(points)
+                    for points in np.split(
+                        y_points_corners, 2 * self._tiling[1]
+                    )
+                ]
+            )
+            new_y_points = np.vstack(
+                [
+                    interleave_with_means(points)
+                    for points in np.split(new_y_points, self._tiling[1])
+                ]
+            )
+            return new_y_points
+
+        new_y_points_linkage = []
+        for y_points_linkage, parameters_linkage in zip(
+            np.split(xyz_points_linkage[:, 1], 2),
+            np.split(
+                self._parameter_spline_initial.evaluate(
+                    linkage_evaluation_points_para
+                ).ravel(),
+                2,
+            ),
+        ):
+            new_y_points_linkage.append(
+                compute_y_linkage_points(y_points_linkage, parameters_linkage)
+            )
+
+        def grid_points_to_tile_points(array, rows_to_not_build_grid=[]):
+            """Turn an array of points and return a list of the points in tiles
+
+            Parameters
+            -----------------
+            array: np.ndarray
+                Array of points, must be 2-dimensional
+            rows_to_not_build_grid: list<int>
+                At these rows there should not be a build a tile, meaning that the
+                corners of the tiles will not be returned for those rows
+            """
+            assert array.ndim == 2, "Array should be 2-dimensional"
+            n_rows, n_cols = array.shape
+            mask = np.array([0, 1, n_cols, n_cols + 1])
+            # Remove the last row
+            row_indices = np.arange((n_rows - 1) * n_cols)
+            # Remove the right column
+            row_indices = row_indices[(row_indices + 1) % array.shape[1] != 0]
+            # Remove the rows where not to build a grid
+            row_indices = row_indices[
+                ~np.isin(row_indices // n_cols, rows_to_not_build_grid)
+            ]
+            mask = mask + row_indices[:, None]
+            # Compute the corner values of every tile
+            result = np.split(
+                array.ravel()[mask.ravel()],
+                (n_rows - 1 - len(rows_to_not_build_grid)) * (n_cols - 1),
+            )
+            return result
+
+        rows_to_not_build_grid = [2, 5]
+        x_cps_linkage_forerun = grid_points_to_tile_points(
+            x_points_linkage_forerun, rows_to_not_build_grid
+        )
+        x_cps_linkage_afterrun = grid_points_to_tile_points(
+            x_points_linkage_afterrun, rows_to_not_build_grid
+        )
+        y_cps_linkage_forerun = grid_points_to_tile_points(
+            new_y_points_linkage[0], rows_to_not_build_grid
+        )
+        y_cps_linkage_afterrun = grid_points_to_tile_points(
+            new_y_points_linkage[1], rows_to_not_build_grid
+        )
+
+        import matplotlib.pyplot as plt
+
+        fig, axes = plt.subplots(ncols=2)
+        closing_indices = np.array([0, 1, 3, 2, 0])
+        for x, y in zip(x_cps_linkage_forerun, y_cps_linkage_forerun):
+            axes[0].plot(x[closing_indices], y[closing_indices], alpha=0.3)
+        for x, y in zip(x_cps_linkage_afterrun, y_cps_linkage_afterrun):
+            axes[1].plot(x[closing_indices], y[closing_indices], alpha=0.3)
+            # axes[1].scatter(x,y)
+        for ax in axes:
+            ax.set_aspect("equal")
+            ax.set_ylim([0.0, self._box_dimensions[1]])
+        plt.show()
+
         return sp.Multipatch(all_patches)
 
     def generate_microstructure(self, macro_sensitivities=None):
@@ -353,7 +527,7 @@ class SMXKernel:
             )
 
     def show_microstructure(self):
-        self.multipatch.show(control_points=False, knots=False)
+        self.multipatch.show(control_points=False, knots=True)
 
 
 if __name__ == "__main__":
@@ -375,7 +549,7 @@ if __name__ == "__main__":
         degrees=[1, 1, 1],
         knot_vectors=macro_spline_initial.kvs,
         control_points=np.array(
-            [0.1, 0.1, 0.1, 0.1, 0.4, 0.4, 0.4, 0.4, 0.2, 0.2, 0.2, 0.2]
+            [0.3, 0.1, 0.05, 0.3, 0.4, 0.4, 0.4, 0.4, 0.2, 0.2, 0.2, 0.2]
         ).reshape(-1, 1),
     )
 
@@ -404,4 +578,4 @@ if __name__ == "__main__":
 
     geokernel.generate_microstructure()
 
-    geokernel.show_microstructure()
+    # geokernel.show_microstructure()
