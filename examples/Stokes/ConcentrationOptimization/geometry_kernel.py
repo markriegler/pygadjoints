@@ -62,6 +62,12 @@ class SMXKernel:
         twist_array = np.zeros(self._z_tiling)
         twist_array[self._twisting_layers] = 1
         self._linkage_array = twist_array[1:] - twist_array[:-1]
+        # Determine which ids in the grid in z-direction correspond to the start of the
+        # tile layers
+        self._tile_layer_ids = np.arange(
+            self._tiling[2], dtype=self._linkage_array.dtype
+        )
+        self._tile_layer_ids[1:] += np.cumsum(np.abs(self._linkage_array))
 
     def _compute_parametric_starting_points(self):
         """Compute the starting points of the tiles and linkages in the parametric
@@ -389,6 +395,15 @@ class SMXKernel:
         # For the y-points also account for the tile parameters
         # For every tile we have to account for the tile's y-coordinates
         def compute_y_linkage_points(y_points, parameters):
+            """
+
+            Returns
+            ------------
+            new_y_points_both: list<np.ndarray>
+                Returns two arrays of y_points. First one is for the "outline", which is
+                for the fore- or afterrun. The second one is for the actual tiles at
+                the start/end of the actual mixer.
+            """
             unique_indices = np.arange(len(y_points))
             row_indices = np.split(unique_indices, x_npoints)
             # Only the middle row indices should be duplicated
@@ -401,7 +416,7 @@ class SMXKernel:
                     row_indices[-1],
                 )
             )
-            y_points_corners = y_points[duplicating_indices]
+            y_points_corners_outline = y_points[duplicating_indices]
             parameters_corners = parameters[duplicating_indices]
             # Compute the dy values at the corners
             dy_values = np.diff(
@@ -414,25 +429,30 @@ class SMXKernel:
             y_shift_values[1::2, :] *= -1.0
             y_shift_values = y_shift_values.ravel()
 
-            y_points_corners += y_shift_values
+            y_points_tile_corners = y_points_corners_outline + y_shift_values
 
             # Interleave in x-direction
-            new_y_points = np.vstack(
-                [
-                    interleave_with_means(points)
-                    for points in np.split(
-                        y_points_corners, 2 * self._tiling[1]
-                    )
-                ]
-            )
-            new_y_points = np.vstack(
-                [
-                    interleave_with_means(points)
-                    for points in np.split(new_y_points, self._tiling[1])
-                ]
-            )
-            return new_y_points
+            new_y_points_both = []
+            for y_points_i in [
+                y_points_corners_outline,
+                y_points_tile_corners,
+            ]:
+                new_y_points = np.vstack(
+                    [
+                        interleave_with_means(points)
+                        for points in np.split(y_points_i, 2 * self._tiling[1])
+                    ]
+                )
+                new_y_points = np.vstack(
+                    [
+                        interleave_with_means(points)
+                        for points in np.split(new_y_points, self._tiling[1])
+                    ]
+                )
+                new_y_points_both.append(new_y_points)
+            return new_y_points_both
 
+        new_y_points_outline = []
         new_y_points_linkage = []
         for y_points_linkage, parameters_linkage in zip(
             np.split(xyz_points_linkage[:, 1], 2),
@@ -443,9 +463,11 @@ class SMXKernel:
                 2,
             ),
         ):
-            new_y_points_linkage.append(
-                compute_y_linkage_points(y_points_linkage, parameters_linkage)
+            new_y_points_both = compute_y_linkage_points(
+                y_points_linkage, parameters_linkage
             )
+            new_y_points_outline.append(new_y_points_both[0])
+            new_y_points_linkage.append(new_y_points_both[1])
 
         def grid_points_to_tile_points(array, rows_to_not_build_grid=[]):
             """Turn an array of points and return a list of the points in tiles
@@ -477,12 +499,18 @@ class SMXKernel:
             )
             return result
 
-        rows_to_not_build_grid = 3*np.arange(1,self._tiling[1]) - 1
+        rows_to_not_build_grid = 3 * np.arange(1, self._tiling[1]) - 1
         x_cps_linkage_forerun = grid_points_to_tile_points(
             x_points_linkage_forerun, rows_to_not_build_grid
         )
         x_cps_linkage_afterrun = grid_points_to_tile_points(
             x_points_linkage_afterrun, rows_to_not_build_grid
+        )
+        y_cps_outline_forerun = grid_points_to_tile_points(
+            new_y_points_outline[0], rows_to_not_build_grid
+        )
+        y_cps_outline_afterrun = grid_points_to_tile_points(
+            new_y_points_outline[1], rows_to_not_build_grid
         )
         y_cps_linkage_forerun = grid_points_to_tile_points(
             new_y_points_linkage[0], rows_to_not_build_grid
@@ -491,19 +519,28 @@ class SMXKernel:
             new_y_points_linkage[1], rows_to_not_build_grid
         )
 
-        import matplotlib.pyplot as plt
-
-        fig, axes = plt.subplots(ncols=2)
-        closing_indices = np.array([0, 1, 3, 2, 0])
-        for x, y in zip(x_cps_linkage_forerun, y_cps_linkage_forerun):
-            axes[0].plot(x[closing_indices], y[closing_indices], alpha=0.3)
-        for x, y in zip(x_cps_linkage_afterrun, y_cps_linkage_afterrun):
-            axes[1].plot(x[closing_indices], y[closing_indices], alpha=0.3)
-            # axes[1].scatter(x,y)
-        for ax in axes:
-            ax.set_aspect("equal")
-            ax.set_ylim([0.0, self._box_dimensions[1]])
-        plt.show()
+        # Append patches of fore- and afterrun
+        for x_cps_layer, y_cps_layer_zmin, y_cps_layer_zmax, z_points in zip(
+            [x_cps_linkage_forerun, x_cps_linkage_afterrun],
+            [y_cps_outline_forerun, y_cps_linkage_afterrun],
+            [y_cps_linkage_forerun, y_cps_outline_afterrun],
+            [
+                np.array([forerun_z_points[-1], 0.0]),
+                np.array([BOX_LENGTH, afterrun_z_points[0]]),
+            ],
+        ):
+            z_cps = np.repeat(z_points, len(x_cps_layer[0]))
+            for x_cps, y_cps_zmin, y_cps_zmax in zip(
+                x_cps_layer, y_cps_layer_zmin, y_cps_layer_zmax
+            ):
+                dummy_tile.cps = np.column_stack(
+                    (
+                        np.tile(x_cps, 2),
+                        np.hstack((y_cps_zmin, y_cps_zmax)),
+                        z_cps,
+                    )
+                )
+                all_patches.append(dummy_tile.copy())
 
         return sp.Multipatch(all_patches)
 
@@ -528,7 +565,7 @@ class SMXKernel:
             )
 
     def show_microstructure(self):
-        self.multipatch.show(control_points=False, knots=True)
+        self.multipatch.show(control_points=False, knots=False)
 
 
 if __name__ == "__main__":
@@ -579,4 +616,4 @@ if __name__ == "__main__":
 
     geokernel.generate_microstructure()
 
-    # geokernel.show_microstructure()
+    geokernel.show_microstructure()
