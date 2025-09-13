@@ -542,7 +542,286 @@ class SMXKernel:
                 )
                 all_patches.append(dummy_tile.copy())
 
+        all_patches += self.compute_layer_linkage_patches()
+
         return sp.Multipatch(all_patches)
+
+    def compute_layer_linkage_patches(self):
+        # Determine the layers where the linkage t2nt (twist to non-twist) and nt2t
+        # (non-twist to twist) are
+        tile_layer_ids = self._tile_layer_ids[:-1]
+        twist_indices = np.nonzero(self._linkage_array)
+        linkage_layer_ids = tile_layer_ids[twist_indices].astype(np.int64) + 1
+        twist_ids = self._linkage_array[twist_indices]
+        # nt2t_layer_ids = tile_layer_ids[self._linkage_array > 0].astype(np.int64) + 1
+        # t2nt_layer_ids = tile_layer_ids[self._linkage_array < 0].astype(nt2t_layer_ids.dtype) + 1
+
+        x_tiling = self._tiling[0]
+        y_tiling = self._tiling[1]
+        x_npoints = x_tiling + 1
+        y_npoints = y_tiling + 1
+
+        def interleave_with_means(array):
+            n = len(array)
+            if array.ndim == 1:
+                result = np.empty(2 * n - 1, dtype=array.dtype)
+                # Place original values
+                result[0::2] = array
+                # Compute means for in-between positions
+                result[1::2] = (array[:-1] + array[1:]) / 2
+            else:
+                result = np.empty(
+                    (2 * n - 1, array.shape[1]), dtype=array.dtype
+                )
+                result[0::2, :] = array
+                result[1::2, :] = (array[:-1, :] + array[1:, :]) / 2
+
+            return result
+
+        def compute_y_linkage_points(y_points, parameters):
+            """
+
+            Returns
+            ------------
+            new_y_points_both: list<np.ndarray>
+                Returns two arrays of y_points. First one is for the "outline", which is
+                for the fore- or afterrun. The second one is for the actual tiles at
+                the start/end of the actual mixer.
+            """
+            unique_indices = np.arange(len(y_points))
+            row_indices = np.split(unique_indices, x_npoints)
+            # Only the middle row indices should be duplicated
+            duplicating_indices = np.hstack(
+                (
+                    row_indices[0],
+                    np.hstack(
+                        [np.tile(indices, 2) for indices in row_indices[1:-1]]
+                    ),
+                    row_indices[-1],
+                )
+            )
+            y_points_corners_outline = y_points[duplicating_indices]
+            parameters_corners = parameters[duplicating_indices]
+            # Compute the dy values at the corners
+            dy_values = np.diff(
+                y_points[unique_indices].reshape(y_npoints, x_npoints), axis=0
+            )
+            dy_corner_values = np.repeat(dy_values, 2, axis=0).ravel()
+            y_shift_values = dy_corner_values * parameters_corners
+            # y-shift should be negative for upper edges of tiles
+            y_shift_values = y_shift_values.reshape(-1, x_npoints)
+            y_shift_values[1::2, :] *= -1.0
+            y_shift_values = y_shift_values.ravel()
+
+            y_points_tile_corners = y_points_corners_outline + y_shift_values
+
+            # Interleave in x-direction
+            new_y_points_both = []
+            for y_points_i in [
+                y_points_corners_outline,
+                y_points_tile_corners,
+            ]:
+                new_y_points = np.vstack(
+                    [
+                        interleave_with_means(points)
+                        for points in np.split(y_points_i, 2 * self._tiling[1])
+                    ]
+                )
+                new_y_points = np.vstack(
+                    [
+                        interleave_with_means(points)
+                        for points in np.split(new_y_points, self._tiling[1])
+                    ]
+                )
+                new_y_points_both.append(new_y_points)
+            return new_y_points_both
+
+        def grid_points_to_tile_points(array, rows_to_not_build_grid=[]):
+            """Turn an array of points and return a list of the points in tiles
+
+            Parameters
+            -----------------
+            array: np.ndarray
+                Array of points, must be 2-dimensional
+            rows_to_not_build_grid: list<int>
+                At these rows there should not be a build a tile, meaning that the
+                corners of the tiles will not be returned for those rows
+            """
+            assert array.ndim == 2, "Array should be 2-dimensional"
+            n_rows, n_cols = array.shape
+            mask = np.array([0, 1, n_cols, n_cols + 1])
+            # Remove the last row
+            row_indices = np.arange((n_rows - 1) * n_cols)
+            # Remove the right column
+            row_indices = row_indices[(row_indices + 1) % array.shape[1] != 0]
+            # Remove the rows where not to build a grid
+            row_indices = row_indices[
+                ~np.isin(row_indices // n_cols, rows_to_not_build_grid)
+            ]
+            mask = mask + row_indices[:, None]
+            # Compute the corner values of every tile
+            result = np.split(
+                array.ravel()[mask.ravel()],
+                (n_rows - 1 - len(rows_to_not_build_grid)) * (n_cols - 1),
+            )
+            return result
+
+        # Compute the nt2t linkages
+        rows_to_not_build_grid = 3 * np.arange(1, y_tiling) - 1
+        all_patches = []
+        dummy_tile = sp.helpme.create.box(1, 1, 1)
+
+        for layer_id, twist_type in zip(linkage_layer_ids, twist_ids):
+            front_cps_list = []
+            back_cps_list = []
+            # Go through the front and back layers
+            for i in range(2):
+                evaluation_points_para = _cartesian_product(
+                    [
+                        self._parametric_grid_points_single[0],
+                        self._parametric_grid_points_single[1],
+                        np.array(
+                            [
+                                self._parametric_grid_points_single[2][
+                                    layer_id + i
+                                ]
+                            ]
+                        ),
+                    ]
+                )
+                grid_points = self._macro_spline_initial.evaluate(
+                    evaluation_points_para
+                )
+                parameters = self._parameter_spline_initial.evaluate(
+                    evaluation_points_para
+                ).ravel()
+                # Non-twist
+                if (i == 0 and twist_type == 1) or (
+                    i == 1 and twist_type == -1
+                ):
+                    # Parameters don't affect x-points
+                    # Interleave in x-direction within rows
+                    interleaved_x_points = np.vstack(
+                        [
+                            interleave_with_means(x_points)
+                            for x_points in np.split(
+                                grid_points[:, 0], y_tiling + 1
+                            )
+                        ]
+                    )
+                    # Interleave in y-direction only within tile
+                    new_x_points = np.vstack(
+                        [
+                            interleave_with_means(
+                                interleaved_x_points[i : i + 2, :]
+                            )
+                            for i in range(y_tiling)
+                        ]
+                    )
+                    # Compute y points
+                    _, new_y_points = compute_y_linkage_points(
+                        grid_points[:, 1], parameters
+                    )
+
+                    interleaved_z_points = np.vstack(
+                        [
+                            interleave_with_means(z_points)
+                            for z_points in np.split(
+                                grid_points[:, 2], y_tiling + 1
+                            )
+                        ]
+                    )
+                    new_z_points = np.vstack(
+                        [
+                            interleave_with_means(
+                                interleaved_z_points[i : i + 2, :]
+                            )
+                            for i in range(y_tiling)
+                        ]
+                    )
+
+                    x_points = grid_points_to_tile_points(
+                        new_x_points, rows_to_not_build_grid
+                    )
+                    y_points = grid_points_to_tile_points(
+                        new_y_points, rows_to_not_build_grid
+                    )
+                    z_points = grid_points_to_tile_points(
+                        new_z_points, rows_to_not_build_grid
+                    )
+                    front_cps_list += [
+                        np.column_stack((x, y, z))
+                        for x, y, z in zip(x_points, y_points, z_points)
+                    ]
+                # Twist
+                else:
+                    # Parameters don't affect x-points
+                    # Interleave in x-direction within rows
+                    interleaved_x_points = np.vstack(
+                        [
+                            interleave_with_means(x_points)
+                            for x_points in np.split(
+                                grid_points[:, 0], y_tiling + 1
+                            )
+                        ]
+                    )
+                    # Interleave in y-direction only within tile
+                    new_x_points = np.vstack(
+                        [
+                            interleave_with_means(
+                                interleaved_x_points[i : i + 2, :]
+                            )
+                            for i in range(y_tiling)
+                        ]
+                    )
+                    # Compute y points
+                    _, new_y_points = compute_y_linkage_points(
+                        grid_points[:, 1], parameters
+                    )
+
+                    interleaved_z_points = np.vstack(
+                        [
+                            interleave_with_means(z_points)
+                            for z_points in np.split(
+                                grid_points[:, 2], y_tiling + 1
+                            )
+                        ]
+                    )
+                    new_z_points = np.vstack(
+                        [
+                            interleave_with_means(
+                                interleaved_z_points[i : i + 2, :]
+                            )
+                            for i in range(y_tiling)
+                        ]
+                    )
+
+                    x_points = grid_points_to_tile_points(
+                        new_x_points, rows_to_not_build_grid
+                    )
+                    y_points = grid_points_to_tile_points(
+                        new_y_points, rows_to_not_build_grid
+                    )
+                    z_points = grid_points_to_tile_points(
+                        new_z_points, rows_to_not_build_grid
+                    )
+
+                if i == 0:
+                    front_cps_list += [
+                        np.column_stack((x, y, z))
+                        for x, y, z in zip(x_points, y_points, z_points)
+                    ]
+                elif i == 1:
+                    back_cps_list += [
+                        np.column_stack((x, y, z))
+                        for x, y, z in zip(x_points, y_points, z_points)
+                    ]
+
+            for front_cps, back_cps in zip(front_cps_list, back_cps_list):
+                dummy_tile.cps = np.vstack((front_cps, back_cps))
+                all_patches.append(dummy_tile.copy())
+
+        return all_patches
 
     def generate_microstructure(self, macro_sensitivities=None):
         # Generate the mixer
