@@ -8,7 +8,7 @@ EPS = 1e-8
 BOX_LENGTH = 0.14
 BOX_HEIGHT = 0.04
 
-TILING = [3, 3, 6]
+TILING = [2, 2, 6]
 TWISTING_LAYERS = [2, 3]
 # How much percent of tile length should be reserved for linking tiles
 LINKAGE_THICKNESS = 0.1
@@ -89,6 +89,7 @@ class SMXKernel:
             y_grid_points,
             z_grid_points,
         ]
+        self._parametric_grid_points_single = parametric_grid_points
 
         # Determine the indices of the rows in the grid points array which correspond
         # to starting points of tiles
@@ -476,7 +477,7 @@ class SMXKernel:
             )
             return result
 
-        rows_to_not_build_grid = [2, 5]
+        rows_to_not_build_grid = 3*np.arange(1,self._tiling[1]) - 1
         x_cps_linkage_forerun = grid_points_to_tile_points(
             x_points_linkage_forerun, rows_to_not_build_grid
         )
