@@ -61,6 +61,7 @@ class SMXKernel:
         # Create an array, where 0 says non-twisted layer and 1 twisted layer
         twist_array = np.zeros(self._z_tiling)
         twist_array[self._twisting_layers] = 1
+        self._twist_array = twist_array
         self._linkage_array = twist_array[1:] - twist_array[:-1]
         # Determine which ids in the grid in z-direction correspond to the start of the
         # tile layers
@@ -134,9 +135,19 @@ class SMXKernel:
                 "Something went wrong in determining the starting points of the tiles"
             )
 
+        # Assign twist/non-twist indicators to tile_start_grid_indices
+        self._grid_indices_twist_indicators = np.repeat(
+            self._twist_array.astype(np.int16),
+            self._tiling[0] * self._tiling[1],
+        )
+
         # self._parametric_start_points = _cartesian_product(
         #     [x_grid_points[:-1], y_grid_points[:-1], z_grid_points[:-1]]
         # )
+
+    def _twist_control_points(self, cps):
+        """Twist control points in the parametric domain"""
+        return np.column_stack((cps[:, 1], 1.0 - cps[:, 0], cps[:, 2]))
 
     def _generate_geometry(self):
         # From compute grid points choose the right indices to get the corner points
@@ -166,6 +177,10 @@ class SMXKernel:
 
         dummy_tile = sp.helpme.create.box(1, 1, 1)
         tile_evaluation_points = SulzerSMXInverse._evaluation_points
+        # For twisted layers, rotate the evaluation points (x->y, 1-y->x, z->z)
+        tile_evaluation_points_twisted = self._twist_control_points(
+            tile_evaluation_points
+        )
 
         all_patches = []
 
@@ -173,7 +188,9 @@ class SMXKernel:
         e = np.array([0, 1])
         E = _cartesian_product([e, e, e])
 
-        for tile_start_grid_index in self._tile_start_grid_indices:
+        for tile_start_grid_index, twist_indicator in zip(
+            self._tile_start_grid_indices, self._grid_indices_twist_indicators
+        ):
             # Compute the tile's corner points in physical space
             tile_corner_points_indices = (
                 tile_point_indices_stencil + tile_start_grid_index
@@ -187,8 +204,14 @@ class SMXKernel:
             ]
             # Get the evaluation points in the parametric domain of the parameter spline
             dummy_tile.cps = tile_corner_points_parametric
-            parameters_evaluation_points_parametric = dummy_tile.evaluate(
+            # For parameter spline evaluate depending on whether twist or non-twist layer
+            tile_evaluation_points_now = (
                 tile_evaluation_points
+                if twist_indicator == 0
+                else tile_evaluation_points_twisted
+            )
+            parameters_evaluation_points_parametric = dummy_tile.evaluate(
+                tile_evaluation_points_now
             )
             # Evaluate parameter spline on tile
             tile_parameters = parameter_spline_initial.evaluate(
@@ -198,6 +221,14 @@ class SMXKernel:
             tile_patches_parametric, _ = self._tile.create_tile(
                 tile_parameters
             )
+            # For twisting layer, twist the patches in the parametric domain
+            if twist_indicator == 1:
+                for ii, patch_i in enumerate(tile_patches_parametric):
+                    twisted_patch = patch_i.copy()
+                    twisted_patch.cps = self._twist_control_points(
+                        twisted_patch.cps
+                    )
+                    tile_patches_parametric[ii] = twisted_patch
 
             tile_linear_interpolator = LinearNDInterpolator(
                 E, tile_corner_points_physical
@@ -943,7 +974,7 @@ if __name__ == "__main__":
         degrees=[1, 1, 1],
         knot_vectors=macro_spline_initial.kvs,
         control_points=np.array(
-            [0.3, 0.1, 0.05, 0.3, 0.4, 0.4, 0.4, 0.4, 0.2, 0.2, 0.2, 0.2]
+            [0.3, 0.1, 0.05, 0.3, 0.4, 0.1, 0.05, 0.3, 0.2, 0.2, 0.2, 0.2]
         ).reshape(-1, 1),
     )
 
