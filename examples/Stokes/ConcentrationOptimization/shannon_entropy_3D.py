@@ -3,22 +3,21 @@ The Shannon entropy calculation is deferred to postmafs. Therefore, at every ste
 a Paraview has to be generated so that postmafs can read it and analyze the streamlines
 """
 
+import sys
+
 import numpy as np
 import scipy.optimize as scopt
 import splinepy as sp
 
-import pygadjoints
-
-import sys
 sys.path.insert(0, "../TemperatureOptimization")
-from export_helpers import AdditionalBlocks, export
+from export_helpers import export
 from smx2d_inverse import SMX2DInverse
 
 EPS = 1e-8
 BOX_LENGTH = 0.14
 BOX_HEIGHT = 0.04
 SHOW_MICROSTRUCTURE = False
-FILENAME = "microstructure_working.xml"
+FILENAME = "static_mixer_working.xml"
 N_THREADS = 1
 sp.settings.NTHREADS = N_THREADS
 
@@ -30,9 +29,11 @@ HEAT_CAPACITY = 2900
 THERMAL_DIFFUSIVITY = 5e-7
 
 # Simulation parameters
+# TILING = [4,2,2]
 TILING = [6, 3]
-N_REFINEMENTS = 1
-DEGREE_ELEVATIONS = 1
+TWISTING_LAYERS = [2, 3]
+N_REFINEMENTS = 0
+DEGREE_ELEVATIONS = 0
 INLET_BOUNDARY_ID = 2
 OUTLET_BOUNDARY_ID = 3
 INLET_PEAK_VELOCITY = 1.4336534897721067
@@ -170,6 +171,8 @@ class MicrostructureKernel:
 
     # TODO: check what this does and if it is correct
     def parameter_sensitivity_function(self, points):
+        """Evaluates all basis functions (even those outside of support) of parameter
+        spline."""
         n_points = points.shape[0]
         basis_function_matrix = np.zeros(
             (n_points, self.parameter_spline.cps.shape[0])
@@ -177,9 +180,12 @@ class MicrostructureKernel:
         basis_functions, support = self.parameter_spline.basis_and_support(
             points
         )
+        # Evaluate all basis functions (incl. those outside of support) on points
         np.put_along_axis(
             basis_function_matrix, support, basis_functions, axis=1
         )
+        # Reshape to 3-tensor and duplicate along 2nd dimension -> duplicating so that
+        # it works with tile DoubleLattice's two parameters
         return np.tile(
             basis_function_matrix.reshape(n_points, 1, -1), [1, 2, 1]
         )
@@ -649,109 +655,111 @@ if __name__ == "__main__":
         boundary_identifier_dict=boundary_identifier_dict,
     )
 
-    # Simulation parameters
-    # Prepare for xml-file export
-    additional_blocks = AdditionalBlocks()
-    # Velocity and pressure boundary conditions
-    additional_blocks.add_boundary_conditions(
-        block_id=1,
-        dim=2,
-        function_list=[
-            ("0.0", "0.0"),
-            (f"{INLET_PEAK_VELOCITY} * y * ({BOX_HEIGHT}-y)", "0"),
-            "0.0",
-        ],
-        bc_list=[
-            (f"BID{INLET_BOUNDARY_ID}", "Dirichlet", 1, 0),  # Inlet
-            ("BID1", "Dirichlet", 0, 0),  # Walls
-            ("BID3", "Dirichlet", 2, 1),  # Pressure BCs
-        ],
-        multipatch_id=0,
-        comment=" Velocity and pressure boundary conditions: parabolic inflow field ",
-    )
+    geometry_kernel.show_initial_geometry()
 
-    # Temperature boundary conditions
-    additional_blocks.add_boundary_conditions(
-        block_id=66,
-        dim=2,
-        function_list=[
-            "0",
-            "-150000000.0*y^4 + 12000000.0*y^3 - 426645.0*y^2 + 7465.8*y + 196.7645",
-            "-683300000.0*y^4 + 54664000.0*y^3 - 1367620.0*y^2 + 10973.6*y + 199.592",
-            # Concentration profile
-            "17080000.0*y^4 - 1366400.0*y^3 + 34184.0*y^2 - 274.24*y + 0.9596",
-        ],
-        bc_list=[
-            (f"BID{INLET_BOUNDARY_ID}", "Dirichlet", 1, 0),
-            (f"BID{OUTLET_BOUNDARY_ID}", "Neumann", 0, 0),
-            ("BID1", "Neumann", 0, 0),
-        ],
-        multipatch_id=0,
-        comment=" Temperature boundary condition ",
-    )
+    # # Simulation parameters
+    # # Prepare for xml-file export
+    # additional_blocks = AdditionalBlocks()
+    # # Velocity and pressure boundary conditions
+    # additional_blocks.add_boundary_conditions(
+    #     block_id=1,
+    #     dim=2,
+    #     function_list=[
+    #         ("0.0", "0.0"),
+    #         (f"{INLET_PEAK_VELOCITY} * y * ({BOX_HEIGHT}-y)", "0"),
+    #         "0.0",
+    #     ],
+    #     bc_list=[
+    #         (f"BID{INLET_BOUNDARY_ID}", "Dirichlet", 1, 0),  # Inlet
+    #         ("BID1", "Dirichlet", 0, 0),  # Walls
+    #         ("BID3", "Dirichlet", 2, 1),  # Pressure BCs
+    #     ],
+    #     multipatch_id=0,
+    #     comment=" Velocity and pressure boundary conditions: parabolic inflow field ",
+    # )
 
-    # Body force
-    additional_blocks.add_function(
-        dim=2,
-        block_id=100,
-        function_string=("0.0", "0.0"),
-        comment=" Body forces ",
-    )
+    # # Temperature boundary conditions
+    # additional_blocks.add_boundary_conditions(
+    #     block_id=66,
+    #     dim=2,
+    #     function_list=[
+    #         "0",
+    #         "-150000000.0*y^4 + 12000000.0*y^3 - 426645.0*y^2 + 7465.8*y + 196.7645",
+    #         "-683300000.0*y^4 + 54664000.0*y^3 - 1367620.0*y^2 + 10973.6*y + 199.592",
+    #         # Concentration profile
+    #         "17080000.0*y^4 - 1366400.0*y^3 + 34184.0*y^2 - 274.24*y + 0.9596",
+    #     ],
+    #     bc_list=[
+    #         (f"BID{INLET_BOUNDARY_ID}", "Dirichlet", 1, 0),
+    #         (f"BID{OUTLET_BOUNDARY_ID}", "Neumann", 0, 0),
+    #         ("BID1", "Neumann", 0, 0),
+    #     ],
+    #     multipatch_id=0,
+    #     comment=" Temperature boundary condition ",
+    # )
 
-    # Get default assembly options
-    additional_blocks.add_assembly_options(
-        block_id=10, comment=" Assembler options "
-    )
+    # # Body force
+    # additional_blocks.add_function(
+    #     dim=2,
+    #     block_id=100,
+    #     function_string=("0.0", "0.0"),
+    #     comment=" Body forces ",
+    # )
 
-    fluid_material_constants = {
-        "viscosity": VISCOSITY,
-        "density": DENSITY,
-        "heat_capacity": HEAT_CAPACITY,
-        "thermal_diffusivity": THERMAL_DIFFUSIVITY,
-    }
+    # # Get default assembly options
+    # additional_blocks.add_assembly_options(
+    #     block_id=10, comment=" Assembler options "
+    # )
 
-    gismo_export_options = additional_blocks.to_list()
+    # fluid_material_constants = {
+    #     "viscosity": VISCOSITY,
+    #     "density": DENSITY,
+    #     "heat_capacity": HEAT_CAPACITY,
+    #     "thermal_diffusivity": THERMAL_DIFFUSIVITY,
+    # }
 
-    simulation_kernel = SimulationKernel(
-        pde_problem=pygadjoints.StokesTemperatureProblem,
-        n_threads=N_THREADS,
-        material_constants=fluid_material_constants,
-        filename=FILENAME,
-        gismo_export_options=gismo_export_options,
-        h_refinements=N_REFINEMENTS,
-        degree_elevations=DEGREE_ELEVATIONS,
-        print_summary=True,
-        objective_function_types=OBJECTIVE_FUNCTION,
-    )
+    # gismo_export_options = additional_blocks.to_list()
 
-    optimization_macro_indices = {
-        1: 0,
-        3: 1,
-        4: [0,1],
-        5: 1,
-        7: 0
-    }
+    # simulation_kernel = SimulationKernel(
+    #     pde_problem=pygadjoints.StokesTemperatureProblem,
+    #     n_threads=N_THREADS,
+    #     material_constants=fluid_material_constants,
+    #     filename=FILENAME,
+    #     gismo_export_options=gismo_export_options,
+    #     h_refinements=N_REFINEMENTS,
+    #     degree_elevations=DEGREE_ELEVATIONS,
+    #     print_summary=True,
+    #     objective_function_types=OBJECTIVE_FUNCTION,
+    # )
 
-    optimizer = OptimizationKernel(
-        geometry_kernel=geometry_kernel,
-        simulation_kernel=simulation_kernel,
-        optimization_method="COBYQA",
-        scaling_factors_objective_function=OBJECTIVE_FUNCTION_WEIGHTS,
-        optimization_macro_indices=optimization_macro_indices,
-    )
+    # optimization_macro_indices = {
+    #     1: 0,
+    #     3: 1,
+    #     4: [0,1],
+    #     5: 1,
+    #     7: 0
+    # }
 
-    bounds = [(0.04, 0.49) for _ in range(optimizer.n_design_vars_para)]
+    # optimizer = OptimizationKernel(
+    #     geometry_kernel=geometry_kernel,
+    #     simulation_kernel=simulation_kernel,
+    #     optimization_method="COBYQA",
+    #     scaling_factors_objective_function=OBJECTIVE_FUNCTION_WEIGHTS,
+    #     optimization_macro_indices=optimization_macro_indices,
+    # )
 
-    # Set bounds for macro cp movement
-    amp_factor = 0.05
-    bounds += [
-        (BOX_LENGTH * amp_factor, BOX_LENGTH * (1 - amp_factor)),
-        (BOX_HEIGHT*amp_factor, BOX_HEIGHT*(1-amp_factor)),
-        (BOX_LENGTH*amp_factor, BOX_LENGTH*(1-amp_factor)),
-        (BOX_HEIGHT*amp_factor, BOX_HEIGHT*(1-amp_factor)),
-        (BOX_HEIGHT*amp_factor, BOX_HEIGHT*(1-amp_factor)),
-        (BOX_LENGTH*amp_factor, BOX_LENGTH*(1-amp_factor))
-    ]
+    # bounds = [(0.04, 0.49) for _ in range(optimizer.n_design_vars_para)]
 
-    optimizer.optimize(bounds=bounds)
-    optimizer.finalize()
+    # # Set bounds for macro cp movement
+    # amp_factor = 0.05
+    # bounds += [
+    #     (BOX_LENGTH * amp_factor, BOX_LENGTH * (1 - amp_factor)),
+    #     (BOX_HEIGHT*amp_factor, BOX_HEIGHT*(1-amp_factor)),
+    #     (BOX_LENGTH*amp_factor, BOX_LENGTH*(1-amp_factor)),
+    #     (BOX_HEIGHT*amp_factor, BOX_HEIGHT*(1-amp_factor)),
+    #     (BOX_HEIGHT*amp_factor, BOX_HEIGHT*(1-amp_factor)),
+    #     (BOX_LENGTH*amp_factor, BOX_LENGTH*(1-amp_factor))
+    # ]
+
+    # optimizer.optimize(bounds=bounds)
+    # optimizer.finalize()
