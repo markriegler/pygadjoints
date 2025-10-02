@@ -9,7 +9,7 @@ BOX_LENGTH = 0.14
 BOX_HEIGHT = 0.04
 
 TILING = [2, 2, 4]
-TWISTING_LAYERS = [2, 3]
+TWISTING_LAYERS = [1, 2]
 # How much percent of tile length should be reserved for linking tiles
 LINKAGE_THICKNESS = 0.2
 # How much percent of box length should be reserved for forerun (the same length will
@@ -966,6 +966,20 @@ class SMXKernel:
     def show_microstructure(self):
         self.multipatch.show(control_points=False, knots=False)
 
+    def show_boundaries(self):
+        assert (
+            self.multipatch is not None
+        ), "Multipatch must first be initialized"
+        n_bds = len(self.multipatch.boundaries)
+        sp.show(
+            *[
+                [f"Boundary {i}", self.multipatch.boundary_multipatch(i)]
+                for i in range(1, n_bds + 1)
+            ],
+            use_saved=True,
+            control_points=False,
+        )
+
 
 if __name__ == "__main__":
     # Create initial parameter spline with controls in the corners and one layer (of 4
@@ -992,10 +1006,12 @@ if __name__ == "__main__":
 
     # Declare identifier function for the inlet and outlet
     def identifier_inlet(points):
-        return points[:, 2] < EPS
+        return points[:, 2] + FORERUN_AFTERRUN_THICKNESS * BOX_LENGTH < EPS
 
     def identifier_outlet(points):
-        return points[:, 2] > BOX_LENGTH - EPS
+        return (
+            points[:, 2] > (1 + FORERUN_AFTERRUN_THICKNESS) * BOX_LENGTH - EPS
+        )
 
     boundary_identifier_dict = {
         identifier_inlet: INLET_BOUNDARY_ID,
