@@ -5,6 +5,7 @@ a Paraview has to be generated so that postmafs can read it and analyze the stre
 
 import sys
 
+import pygadjoints
 import numpy as np
 import scipy.optimize as scopt
 import splinepy as sp
@@ -12,10 +13,10 @@ from geometry_kernel import SMXKernel
 from splinepy.utils.data import cartesian_product as _cartesian_product
 
 sys.path.insert(0, "../TemperatureOptimization")
-from export_helpers import export
+from export_helpers import export, AdditionalBlocks
 
 EPS = 1e-8
-BOX_LENGTH = 0.14
+BOX_LENGTH = 0.124
 BOX_HEIGHT = 0.04
 SHOW_MICROSTRUCTURE = False
 FILENAME = "static_mixer_working.xml"
@@ -26,8 +27,7 @@ sp.settings.NTHREADS = N_THREADS
 DENSITY = 736
 VISCOSITY = 6000
 HEAT_CAPACITY = 2900
-# THERMAL_DIFFUSIVITY = 1.1997e-7
-THERMAL_DIFFUSIVITY = 5e-7
+THERMAL_DIFFUSIVITY = 1.1997e-7
 
 # Simulation parameters
 TILING = [2, 2, 4]
@@ -36,7 +36,7 @@ TWISTING_LAYERS = [1, 2]
 LINKAGE_THICKNESS = 0.2
 # How much percent of box length should be reserved for forerun (the same length will
 # be applied for the afterrun)
-FORERUN_AFTERRUN_THICKNESS = 0.5
+FORERUN_AFTERRUN_THICKNESS = 0.2
 # Determines the percentage of the whole forerun length to be dedicated to the linkage
 FORERUN_AFTERRUN_LINKAGE_LENGTH = 0.1
 N_REFINEMENTS = 0
@@ -60,6 +60,7 @@ class SimulationKernel:
         objective_function_types,
         h_refinements=0,
         degree_elevations=0,
+        h_refinements_temperature=0,
         print_summary=False,
         is_nonlinear_pde=False,
     ):
@@ -90,6 +91,7 @@ class SimulationKernel:
         self.filename = filename
         self.h_refinements = h_refinements
         self.degree_elevations = degree_elevations
+        self.h_refinements_temperature = h_refinements_temperature
         self.print_summary = print_summary
         self.gismo_export_options = gismo_export_options
         self.is_nonlinear_pde = is_nonlinear_pde
@@ -101,6 +103,7 @@ class SimulationKernel:
             fname=self.filename,
             refinements=self.h_refinements,
             degree_elevations=self.degree_elevations,
+            refinements_temperature=self.h_refinements_temperature,
             print_summary=self.print_summary,
         )
 
@@ -435,6 +438,7 @@ if __name__ == "__main__":
         twisting_layers=TWISTING_LAYERS,
         linkage_thickness=LINKAGE_THICKNESS,
         forerun_thickness=FORERUN_AFTERRUN_THICKNESS,
+        forerun_linkage_length=FORERUN_AFTERRUN_LINKAGE_LENGTH,
         parameter_spline_initial=parameter_spline_initial,
         macro_spline_initial=macro_spline_initial,
         boundary_identifier_dict=boundary_identifier_dict,
@@ -449,10 +453,10 @@ if __name__ == "__main__":
     # # Velocity and pressure boundary conditions
     # additional_blocks.add_boundary_conditions(
     #     block_id=1,
-    #     dim=2,
+    #     dim=3,
     #     function_list=[
-    #         ("0.0", "0.0"),
-    #         (f"{INLET_PEAK_VELOCITY} * y * ({BOX_HEIGHT}-y)", "0"),
+    #         ("0.0", "0.0", "0.0"),
+    #         ("0.0", "0.0", f"{INLET_PEAK_VELOCITY} * x * ({BOX_HEIGHT}-x) y * ({BOX_HEIGHT}-y)"),
     #         "0.0",
     #     ],
     #     bc_list=[
@@ -464,33 +468,13 @@ if __name__ == "__main__":
     #     comment=" Velocity and pressure boundary conditions: parabolic inflow field ",
     # )
 
-    # # Temperature boundary conditions
-    # additional_blocks.add_boundary_conditions(
-    #     block_id=66,
-    #     dim=2,
-    #     function_list=[
-    #         "0",
-    #         "-150000000.0*y^4 + 12000000.0*y^3 - 426645.0*y^2 + 7465.8*y + 196.7645",
-    #         "-683300000.0*y^4 + 54664000.0*y^3 - 1367620.0*y^2 + 10973.6*y + 199.592",
-    #         # Concentration profile
-    #         "17080000.0*y^4 - 1366400.0*y^3 + 34184.0*y^2 - 274.24*y + 0.9596",
-    #     ],
-    #     bc_list=[
-    #         (f"BID{INLET_BOUNDARY_ID}", "Dirichlet", 1, 0),
-    #         (f"BID{OUTLET_BOUNDARY_ID}", "Neumann", 0, 0),
-    #         ("BID1", "Neumann", 0, 0),
-    #     ],
-    #     multipatch_id=0,
-    #     comment=" Temperature boundary condition ",
-    # )
-
-    # # Body force
-    # additional_blocks.add_function(
-    #     dim=2,
-    #     block_id=100,
-    #     function_string=("0.0", "0.0"),
-    #     comment=" Body forces ",
-    # )
+    # # # Body force
+    # # additional_blocks.add_function(
+    # #     dim=2,
+    # #     block_id=100,
+    # #     function_string=("0.0", "0.0", "0.0"),
+    # #     comment=" Body forces ",
+    # # )
 
     # # Get default assembly options
     # additional_blocks.add_assembly_options(

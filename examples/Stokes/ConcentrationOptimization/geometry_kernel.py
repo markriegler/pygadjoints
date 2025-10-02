@@ -31,6 +31,7 @@ class SMXKernel:
         twisting_layers,
         linkage_thickness,
         forerun_thickness,
+        forerun_linkage_length,
         parameter_spline_initial,
         macro_spline_initial,
         boundary_identifier_dict=None,
@@ -41,6 +42,7 @@ class SMXKernel:
         self._twisting_layers = twisting_layers
         self._linkage_thickness = linkage_thickness
         self._forerun_thickness = forerun_thickness
+        self._forerun_linkage_length = forerun_linkage_length
         self._parameter_spline_initial = parameter_spline_initial
         self._parameter_spline = parameter_spline_initial.copy()
         self._macro_spline_initial = macro_spline_initial
@@ -248,14 +250,14 @@ class SMXKernel:
             all_patches += tile_patches
 
         # Start with the fore and afterrun
-        forerun_length = FORERUN_AFTERRUN_THICKNESS * BOX_LENGTH
+        forerun_length = self._forerun_thickness * self._box_dimensions[2]
         forerun_linkage_length = (
-            forerun_length * FORERUN_AFTERRUN_LINKAGE_LENGTH
+            forerun_length * self._forerun_linkage_length
         )
         forerun_z_points = np.array(
             [-forerun_length, -forerun_length / 2, -forerun_linkage_length]
         )
-        afterrun_z_points = BOX_LENGTH - np.flip(forerun_z_points)
+        afterrun_z_points = self._box_dimensions[2] - np.flip(forerun_z_points)
 
         sp.helpme.create.box(1, 1, 1)
 
@@ -559,7 +561,7 @@ class SMXKernel:
             [y_cps_linkage_forerun, y_cps_outline_afterrun],
             [
                 np.array([forerun_z_points[-1], 0.0]),
-                np.array([BOX_LENGTH, afterrun_z_points[0]]),
+                np.array([self._box_dimensions[2], afterrun_z_points[0]]),
             ],
         ):
             z_cps = np.repeat(z_points, len(x_cps_layer[0]))
@@ -1024,6 +1026,7 @@ if __name__ == "__main__":
         twisting_layers=TWISTING_LAYERS,
         linkage_thickness=LINKAGE_THICKNESS,
         forerun_thickness=FORERUN_AFTERRUN_THICKNESS,
+        forerun_linkage_length=FORERUN_AFTERRUN_LINKAGE_LENGTH,
         parameter_spline_initial=parameter_spline_initial,
         macro_spline_initial=macro_spline_initial,
         boundary_identifier_dict=boundary_identifier_dict,
