@@ -8,7 +8,7 @@ EPS = 1e-8
 BOX_LENGTH = 0.14
 BOX_HEIGHT = 0.04
 
-TILING = [2, 2, 6]
+TILING = [2, 2, 4]
 TWISTING_LAYERS = [2, 3]
 # How much percent of tile length should be reserved for linking tiles
 LINKAGE_THICKNESS = 0.2
@@ -42,8 +42,11 @@ class SMXKernel:
         self._linkage_thickness = linkage_thickness
         self._forerun_thickness = forerun_thickness
         self._parameter_spline_initial = parameter_spline_initial
+        self._parameter_spline = parameter_spline_initial.copy()
         self._macro_spline_initial = macro_spline_initial
+        self._macro_spline = macro_spline_initial.copy()
         self._tile = SulzerSMXInverse()
+        self.n_tile_parameters = self._tile._n_info_per_eval_point
         self.boundary_identifier_dict = boundary_identifier_dict
 
         self.interfaces = None
@@ -146,7 +149,7 @@ class SMXKernel:
         # )
 
     def _twist_control_points(self, cps):
-        """Twist control points in the parametric domain"""
+        """Auxiliary function to twist control points in the parametric domain"""
         return np.column_stack((cps[:, 1], 1.0 - cps[:, 0], cps[:, 2]))
 
     def _generate_geometry(self):
@@ -170,10 +173,9 @@ class SMXKernel:
         )
 
         # Determine the tiles' starting points in the physical domain
-        grid_points_physical = self._macro_spline_initial.evaluate(
+        grid_points_physical = self._macro_spline.evaluate(
             self._parametric_grid_points
         )
-        # start_grid_points_physical = grid_points_physical[self._tile_start_grid_indices])
 
         dummy_tile = sp.helpme.create.box(1, 1, 1)
         tile_evaluation_points = SulzerSMXInverse._evaluation_points
@@ -204,7 +206,8 @@ class SMXKernel:
             ]
             # Get the evaluation points in the parametric domain of the parameter spline
             dummy_tile.cps = tile_corner_points_parametric
-            # For parameter spline evaluate depending on whether twist or non-twist layer
+            # For parameter spline evaluate depending on whether twist or non-twist
+            # layer
             tile_evaluation_points_now = (
                 tile_evaluation_points
                 if twist_indicator == 0
@@ -214,7 +217,7 @@ class SMXKernel:
                 tile_evaluation_points_now
             )
             # Evaluate parameter spline on tile
-            tile_parameters = parameter_spline_initial.evaluate(
+            tile_parameters = self._parameter_spline.evaluate(
                 parameters_evaluation_points_parametric
             )
             # Evaluate tile in tile's parametric space
@@ -256,13 +259,12 @@ class SMXKernel:
 
         sp.helpme.create.box(1, 1, 1)
 
-        # inlet_xy_points = self._macro_spline_initial.evaluate(self._parametric_grid_points[:layer_npoints])
         x_points_para = np.linspace(0, 1, self._tiling[0] + 1)
         y_points_para = np.linspace(0, 1, self._tiling[1] + 1)
         xy_parametric_grid_evaluation_points = _cartesian_product(
             [x_points_para[:-1], y_points_para[:-1], np.array([0.0, 1.0])]
         )
-        xy_box_points = self._macro_spline_initial.evaluate(
+        xy_box_points = self._macro_spline.evaluate(
             xy_parametric_grid_evaluation_points
         )
         forerun_start_xy_points, afterrun_start_xy_points = np.split(
@@ -272,7 +274,7 @@ class SMXKernel:
         box_grid_points_parametric = _cartesian_product(
             [x_points_para, y_points_para[:-1], np.array([0.0, 1.0])]
         )
-        all_box_grid_points = self._macro_spline_initial.evaluate(
+        all_box_grid_points = self._macro_spline.evaluate(
             box_grid_points_parametric
         )
         dx_box_points = [
@@ -286,7 +288,7 @@ class SMXKernel:
         box_grid_points_parametric = _cartesian_product(
             [x_points_para[:-1], y_points_para, np.array([0.0, 1.0])]
         )
-        all_box_grid_points = self._macro_spline_initial.evaluate(
+        all_box_grid_points = self._macro_spline.evaluate(
             box_grid_points_parametric
         )
         # Reorder all rows such that the y-coordinate is the first ascending direction
@@ -300,7 +302,7 @@ class SMXKernel:
                 ]
             )
             reorder_indices.append(new_indices)
-            offset += (self._tiling[0] + 1) * self._tiling[1]
+            offset += self._tiling[0] * (self._tiling[1] + 1)
         all_box_grid_points = all_box_grid_points[np.hstack(reorder_indices)]
         dy_box_points = [
             np.diff(points, axis=0)[:, 1]
@@ -373,7 +375,7 @@ class SMXKernel:
             [x_points_para, y_points_para, np.array([0.0, 1.0])]
         )
         # For nontwisted layer dy is needed; similarly dx is needed for twisted layer
-        xyz_points_linkage = self._macro_spline_initial.evaluate(
+        xyz_points_linkage = self._macro_spline.evaluate(
             linkage_evaluation_points_para
         )
         # x-points are the tiles' x-points plus the points in the middle
@@ -488,7 +490,7 @@ class SMXKernel:
         for y_points_linkage, parameters_linkage in zip(
             np.split(xyz_points_linkage[:, 1], 2),
             np.split(
-                self._parameter_spline_initial.evaluate(
+                self._parameter_spline.evaluate(
                     linkage_evaluation_points_para
                 ).ravel(),
                 2,
@@ -584,8 +586,6 @@ class SMXKernel:
         twist_indices = np.nonzero(self._linkage_array)
         linkage_layer_ids = tile_layer_ids[twist_indices].astype(np.int64) + 1
         twist_ids = self._linkage_array[twist_indices]
-        # nt2t_layer_ids = tile_layer_ids[self._linkage_array > 0].astype(np.int64) + 1
-        # t2nt_layer_ids = tile_layer_ids[self._linkage_array < 0].astype(nt2t_layer_ids.dtype) + 1
 
         x_tiling = self._tiling[0]
         y_tiling = self._tiling[1]
@@ -796,10 +796,10 @@ class SMXKernel:
                         ),
                     ]
                 )
-                grid_points = self._macro_spline_initial.evaluate(
+                grid_points = self._macro_spline.evaluate(
                     evaluation_points_para
                 )
-                parameters = self._parameter_spline_initial.evaluate(
+                parameters = self._parameter_spline.evaluate(
                     evaluation_points_para
                 ).ravel()
                 # Non-twist
@@ -950,6 +950,18 @@ class SMXKernel:
             self.multipatch.boundary_from_function(
                 identifier_function, boundary_id=boundary_id
             )
+
+    def get_multipatch(self):
+        return self.multipatch
+
+    def update_parameter_spline(self, new_spline_parameters):
+        self._parameter_spline.cps[:] = new_spline_parameters.reshape(
+            (-1, self.n_tile_parameters)
+        )
+
+    def update_macro_spline(self, new_values, cp_indices, cp_directions):
+        """Update the control points of the macro spline"""
+        self._macro_spline.cps[cp_indices, cp_directions] = new_values
 
     def show_microstructure(self):
         self.multipatch.show(control_points=False, knots=False)
