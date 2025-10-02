@@ -8,10 +8,11 @@ import sys
 import numpy as np
 import scipy.optimize as scopt
 import splinepy as sp
+from geometry_kernel import SMXKernel
+from splinepy.utils.data import cartesian_product as _cartesian_product
 
 sys.path.insert(0, "../TemperatureOptimization")
 from export_helpers import export
-from smx2d_inverse import SMX2DInverse
 
 EPS = 1e-8
 BOX_LENGTH = 0.14
@@ -29,9 +30,15 @@ HEAT_CAPACITY = 2900
 THERMAL_DIFFUSIVITY = 5e-7
 
 # Simulation parameters
-# TILING = [4,2,2]
-TILING = [6, 3]
-TWISTING_LAYERS = [2, 3]
+TILING = [2, 2, 4]
+TWISTING_LAYERS = [1, 2]
+# How much percent of tile length should be reserved for linking tiles
+LINKAGE_THICKNESS = 0.2
+# How much percent of box length should be reserved for forerun (the same length will
+# be applied for the afterrun)
+FORERUN_AFTERRUN_THICKNESS = 0.5
+# Determines the percentage of the whole forerun length to be dedicated to the linkage
+FORERUN_AFTERRUN_LINKAGE_LENGTH = 0.1
 N_REFINEMENTS = 0
 DEGREE_ELEVATIONS = 0
 INLET_BOUNDARY_ID = 2
@@ -40,225 +47,6 @@ INLET_PEAK_VELOCITY = 1.4336534897721067
 CLOSING_FACE = "x"
 OBJECTIVE_FUNCTION = [1]
 OBJECTIVE_FUNCTION_WEIGHTS = [1]
-
-
-# TODO: generator.parameter_sensitivity_function
-class MicrostructureKernel:
-    """Class to generate to microstructure geometry"""
-
-    def __init__(
-        self,
-        initial_macro_spline,
-        microtile,
-        tiling,
-        parameter_spline_degrees=None,
-        parameter_spline_cps_dimensions=None,
-        initial_parameter_value=None,
-        initial_parameter_spline=None,
-        closing_face=None,
-        additional_parameters={},
-        boundary_identifier_dict=None,
-    ):
-        """
-        Initialize the geometry driver. Parameter may be given either as spline
-        object or via degrees, cps dimensions and initial value.
-
-        Parameters
-        --------------
-        initial_macro_spline: spline
-            Initial macro spline. Might deform later
-        microtile: splinepy.microstructure.tiles
-            The used microtile in the microstructure
-        tiling: list<int>
-            The number of tiles in each physical direction
-        parameter_spline_degrees: list<int> (optional)
-            Spline degrees for parameter spline
-        parameter_spline_cps_dimensions: list<int> (optional)
-            Number of control points in each direction for parameter spline
-        initial_parameter_value: float/list<float>/np.ndarray
-            Initial value(s) for parameter spline. If tile takes multiple parameters,
-            multiple values must be given.
-        intial_parameter_spline: spline (optional)
-            Initial spline for tile parametrization. Might change during
-            optimization.
-        closing_face: str (optional)
-            Direction in which the whole microstructure will be closed
-        additional_parameters: dict (optional)
-            Additional parameters (e.g. contact_length) for microstructure generation
-        boundary_identifier_dict: dict<callable, int>
-            Dictionary of boundary identifier functions and corresponding boundary IDs
-        """
-        self.macro_spline_initial = initial_macro_spline.copy()
-        self.microtile = microtile
-        self.n_tile_parameters = microtile._n_info_per_eval_point
-        self.parameters_shape = [
-            len(microtile._evaluation_points),
-            self.n_tile_parameters,
-        ]
-        self.tiling = tiling
-
-        # Parameter spline
-        if initial_parameter_spline is not None:
-            assert (
-                parameter_spline_degrees is None
-                and parameter_spline_cps_dimensions is None
-                and initial_parameter_value is None
-            ), (
-                "If parameter spline is given, other values do not have to be"
-                + "implemented"
-            )
-            # Assert that parameter spline has the right number of parameters
-            assert (
-                initial_parameter_spline.cps.shape[1] == self.n_tile_parameters
-            )
-            self.parameter_spline = initial_parameter_spline
-        elif initial_parameter_value is not None:
-            assert (
-                parameter_spline_degrees is not None
-                and parameter_spline_cps_dimensions is not None
-            ), "Ensure that other parameter spline information is provided"
-            knot_vectors = [
-                np.linspace(0, 1, n_cps - degree + 1)
-                for n_cps, degree in zip(
-                    parameter_spline_cps_dimensions, parameter_spline_degrees
-                )
-            ]
-            knot_vectors = [
-                np.hstack(([0] * degree, knot_vector, [1] * degree))
-                for knot_vector, degree in zip(
-                    knot_vectors, parameter_spline_degrees
-                )
-            ]
-            self.parameter_spline = sp.BSpline(
-                degrees=parameter_spline_degrees,
-                control_points=initial_parameter_value
-                * np.ones(
-                    (
-                        np.prod(parameter_spline_cps_dimensions),
-                        self.n_tile_parameters,
-                    )
-                ),
-                knot_vectors=knot_vectors,
-            )
-        else:
-            raise NotImplementedError(
-                "Microstructure without any parameters not implemented!"
-            )
-        self.parameter_spline_initial = self.parameter_spline.copy()
-
-        self.generator = sp.microstructure.Microstructure(
-            deformation_function=initial_macro_spline.copy(),
-            tiling=tiling,
-            microtile=microtile,
-            parametrization_function=self.parametrization_function,
-        )
-
-        self.closing_face = closing_face
-        self.additional_parameters = additional_parameters
-        assert isinstance(
-            boundary_identifier_dict, dict
-        ), "identifer_dict must be a dictionary"
-        self.boundary_identifier_dict = boundary_identifier_dict
-
-        # Make interfaces reusable
-        self.interfaces = None
-        self.multipatch = None
-
-    # TODO: if tile has multiple parameters, evaluate will just output one value
-    # and repeat it
-    def parametrization_function(self, points):
-        return self.parameter_spline.evaluate(points)
-
-    # TODO: check what this does and if it is correct
-    def parameter_sensitivity_function(self, points):
-        """Evaluates all basis functions (even those outside of support) of parameter
-        spline."""
-        n_points = points.shape[0]
-        basis_function_matrix = np.zeros(
-            (n_points, self.parameter_spline.cps.shape[0])
-        )
-        basis_functions, support = self.parameter_spline.basis_and_support(
-            points
-        )
-        # Evaluate all basis functions (incl. those outside of support) on points
-        np.put_along_axis(
-            basis_function_matrix, support, basis_functions, axis=1
-        )
-        # Reshape to 3-tensor and duplicate along 2nd dimension -> duplicating so that
-        # it works with tile DoubleLattice's two parameters
-        return np.tile(
-            basis_function_matrix.reshape(n_points, 1, -1), [1, 2, 1]
-        )
-
-    def generate_microstructure(self, macro_sensitivities=None):
-        self.multipatch = self.generator.create(
-            closing_face=self.closing_face,
-            macro_sensitivites=macro_sensitivities,
-            **self.additional_parameters,
-        )
-
-        # Reuse existing interfaces
-        if self.interfaces is None:
-            self.multipatch.determine_interfaces()
-            self.interfaces = self.multipatch.interfaces
-        else:
-            self.multipatch.interfaces = self.interfaces
-
-        # Assign boundaries from identifier functions
-        for (
-            identifier_function,
-            boundary_id,
-        ) in self.boundary_identifier_dict.items():
-            self.multipatch.boundary_from_function(
-                identifier_function, boundary_id=boundary_id
-            )
-
-    def get_multipatch(self):
-        return self.multipatch
-
-    def update_parameter_spline(self, new_spline_parameters):
-        self.parameter_spline.cps[:] = new_spline_parameters.reshape(
-            (-1, self.n_tile_parameters)
-        )
-
-    def update_macro_spline(self, new_values, cp_indices, cp_directions):
-        self.generator.deformation_function.cps[
-            cp_indices, cp_directions
-        ] = new_values
-
-    def show_current_geometry(self):
-        self.generator.show(
-            closing_face=self.closing_face, **self.additional_parameters
-        )
-
-    def show_initial_geometry(self):
-        def initial_parametrization_function(points):
-            return self.parameter_spline_initial.evaluate(points)
-
-        initial_generator = sp.microstructure.Microstructure(
-            deformation_function=self.macro_spline_initial,
-            tiling=self.tiling,
-            microtile=self.microtile,
-            parametrization_function=initial_parametrization_function,
-        )
-
-        initial_generator.show(
-            closing_face=self.closing_face, **self.additional_parameters
-        )
-
-    def show_boundaries(self):
-        assert (
-            self.multipatch is not None
-        ), "Multipatch must first be initialized"
-        n_bds = len(self.multipatch.boundaries)
-        sp.show(
-            *[
-                [f"Boundary {i}", self.multipatch.boundary_multipatch(i)]
-                for i in range(1, n_bds + 1)
-            ],
-            use_saved=True,
-            control_points=False,
-        )
 
 
 class SimulationKernel:
@@ -606,56 +394,54 @@ class OptimizationKernel:
 
 
 if __name__ == "__main__":
-    # Define microstructure deformation function
-    initial_macro_spline = sp.Bezier(
-        degrees=[2, 2],
-        control_points=sp.utils.data.cartesian_product(
-            [np.linspace(0, BOX_LENGTH, 3), np.linspace(0, BOX_HEIGHT, 3)]
+    # Create initial parameter spline with controls in the corners and one layer (of 4
+    # points) in the middle into the z-direction
+    macro_spline_initial = sp.BSpline(
+        degrees=[1, 1, 1],
+        knot_vectors=[[0, 0, 1, 1], [0, 0, 1, 1], [0, 0, 0.5, 1, 1]],
+        control_points=_cartesian_product(
+            [
+                np.array([0, BOX_HEIGHT]),
+                np.array([0, BOX_HEIGHT]),
+                np.array([0, BOX_LENGTH / 2, BOX_LENGTH]),
+            ]
         ),
     )
 
     # Define identifier functions for microstructure boundaries
     def identifier_inlet(points):
-        return points[:, 0] < EPS
+        return points[:, 2] + FORERUN_AFTERRUN_THICKNESS * BOX_LENGTH < EPS
 
     def identifier_outlet(points):
-        return points[:, 0] > BOX_LENGTH - EPS
+        return (
+            points[:, 2] > (1 + FORERUN_AFTERRUN_THICKNESS) * BOX_LENGTH - EPS
+        )
 
     boundary_identifier_dict = {
         identifier_inlet: INLET_BOUNDARY_ID,
         identifier_outlet: OUTLET_BOUNDARY_ID,
     }
 
-    # Describe initial parameter spline such that every tile is parametrized
-    # knot_vectors = [np.linspace(0, 1, val + 1) for val in TILING]
-    # knot_vectors = [np.hstack((kv[0], kv, kv[-1])) for kv in knot_vectors]
-    # knot_vectors = [
-    #     [0.0, 0.0, 1/3, 2/3, 1.0, 1.0],
-    #     [0.0, 0.0, 1/3, 2/3, 1.0, 1.0]
-    # ]
-    knot_vectors = [[0.0, 0.0, 1.0, 1.0]] * 2
-
-    default_parameter_value = 0.2
-    control_points = default_parameter_value * np.ones(
-        (np.prod([len(kv) - 2 for kv in knot_vectors]), 1)
+    # Prepare parameter spline
+    parameter_spline_initial = sp.BSpline(
+        degrees=[1, 1, 1],
+        knot_vectors=macro_spline_initial.kvs,
+        control_points=0.05 * np.ones((12, 1)),
     )
 
-    initial_parameter_spline = sp.BSpline(
-        degrees=[1, 1],
-        knot_vectors=knot_vectors,
-        control_points=control_points,
-    )
-
-    geometry_kernel = MicrostructureKernel(
-        initial_macro_spline=initial_macro_spline,
-        microtile=SMX2DInverse(),
+    geometry_kernel = SMXKernel(
+        box_dimensions=[BOX_HEIGHT, BOX_HEIGHT, BOX_LENGTH],
         tiling=TILING,
-        initial_parameter_spline=initial_parameter_spline,
-        closing_face=CLOSING_FACE,
+        twisting_layers=TWISTING_LAYERS,
+        linkage_thickness=LINKAGE_THICKNESS,
+        forerun_thickness=FORERUN_AFTERRUN_THICKNESS,
+        parameter_spline_initial=parameter_spline_initial,
+        macro_spline_initial=macro_spline_initial,
         boundary_identifier_dict=boundary_identifier_dict,
     )
 
-    geometry_kernel.show_initial_geometry()
+    geometry_kernel.generate_microstructure()
+    geometry_kernel.show_microstructure()
 
     # # Simulation parameters
     # # Prepare for xml-file export
