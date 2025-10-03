@@ -5,15 +5,16 @@ a Paraview has to be generated so that postmafs can read it and analyze the stre
 
 import sys
 
-import pygadjoints
 import numpy as np
 import scipy.optimize as scopt
 import splinepy as sp
 from geometry_kernel import SMXKernel
 from splinepy.utils.data import cartesian_product as _cartesian_product
 
+import pygadjoints
+
 sys.path.insert(0, "../TemperatureOptimization")
-from export_helpers import export, AdditionalBlocks
+from export_helpers import AdditionalBlocks, export
 
 EPS = 1e-8
 BOX_LENGTH = 0.124
@@ -39,13 +40,13 @@ LINKAGE_THICKNESS = 0.2
 FORERUN_AFTERRUN_THICKNESS = 0.2
 # Determines the percentage of the whole forerun length to be dedicated to the linkage
 FORERUN_AFTERRUN_LINKAGE_LENGTH = 0.1
-N_REFINEMENTS = 0
+N_REFINEMENTS = 1
 DEGREE_ELEVATIONS = 0
 INLET_BOUNDARY_ID = 2
 OUTLET_BOUNDARY_ID = 3
-INLET_PEAK_VELOCITY = 1.4336534897721067
-CLOSING_FACE = "x"
-OBJECTIVE_FUNCTION = [1]
+INLET_PEAK_VELOCITY = 66342.5611413043
+OBJECTIVE_FUNCTION = [1]  # 1: pressure loss, 2: deviation from
+# mean temperature
 OBJECTIVE_FUNCTION_WEIGHTS = [1]
 
 
@@ -123,9 +124,9 @@ class SimulationKernel:
         # Fluid simulations
         self.pde.assemble_fluid_problem()
         self.pde.solve_fluid_linear_system()
-        # Heat simulation
-        self.pde.assemble_heat_problem()
-        self.pde.solve_heat_linear_system()
+        # # Heat simulation
+        # self.pde.assemble_heat_problem()
+        # self.pde.solve_heat_linear_system()
 
     def evaluate_objective_functions(self):
         return self.pde.compute_objective_function_values()
@@ -445,62 +446,89 @@ if __name__ == "__main__":
     )
 
     geometry_kernel.generate_microstructure()
-    geometry_kernel.show_microstructure()
+    # geometry_kernel.show_microstructure()
 
-    # # Simulation parameters
-    # # Prepare for xml-file export
-    # additional_blocks = AdditionalBlocks()
-    # # Velocity and pressure boundary conditions
-    # additional_blocks.add_boundary_conditions(
-    #     block_id=1,
-    #     dim=3,
-    #     function_list=[
-    #         ("0.0", "0.0", "0.0"),
-    #         ("0.0", "0.0", f"{INLET_PEAK_VELOCITY} * x * ({BOX_HEIGHT}-x) y * ({BOX_HEIGHT}-y)"),
-    #         "0.0",
-    #     ],
-    #     bc_list=[
-    #         (f"BID{INLET_BOUNDARY_ID}", "Dirichlet", 1, 0),  # Inlet
-    #         ("BID1", "Dirichlet", 0, 0),  # Walls
-    #         ("BID3", "Dirichlet", 2, 1),  # Pressure BCs
-    #     ],
-    #     multipatch_id=0,
-    #     comment=" Velocity and pressure boundary conditions: parabolic inflow field ",
-    # )
+    # Simulation parameters
+    # Prepare for xml-file export
+    additional_blocks = AdditionalBlocks()
+    # Velocity and pressure boundary conditions
+    additional_blocks.add_boundary_conditions(
+        block_id=1,
+        dim=3,
+        function_list=[
+            ("0.0", "0.0", "0.0"),
+            (
+                "0.0",
+                "0.0",
+                f"{INLET_PEAK_VELOCITY} * x * ({BOX_HEIGHT}-x) y * ({BOX_HEIGHT}-y)",
+            ),
+            "0.0",
+        ],
+        bc_list=[
+            (f"BID{INLET_BOUNDARY_ID}", "Dirichlet", 1, 0),  # Inlet
+            ("BID1", "Dirichlet", 0, 0),  # Walls
+            (f"BID{OUTLET_BOUNDARY_ID}", "Dirichlet", 2, 1),  # Pressure BCs
+        ],
+        multipatch_id=0,
+        comment=" Velocity and pressure boundary conditions: bi-parabolic inflow field ",
+    )
 
-    # # # Body force
-    # # additional_blocks.add_function(
-    # #     dim=2,
-    # #     block_id=100,
-    # #     function_string=("0.0", "0.0", "0.0"),
-    # #     comment=" Body forces ",
-    # # )
+    # Temperature boundary conditions (right now not needed)
+    half_length = BOX_HEIGHT / 2
+    additional_blocks.add_boundary_conditions(
+        block_id=66,
+        dim=3,
+        function_list=[
+            "0.0",
+            f"if(x >= {half_length}, 0, if (y >= {half_length}, 0, 1))",
+        ],
+        bc_list=[
+            ("BID1", "Neumann", 0, 0),
+            (f"BID{OUTLET_BOUNDARY_ID}", "Neumann", 0, 0),
+            (f"BID{INLET_BOUNDARY_ID}", "Dirichlet", 1, 0),
+        ],
+        multipatch_id=0,
+        comment=" Temperature boundary conditions ",
+    )
 
-    # # Get default assembly options
-    # additional_blocks.add_assembly_options(
-    #     block_id=10, comment=" Assembler options "
-    # )
+    # Body force
+    additional_blocks.add_function(
+        dim=3,
+        block_id=100,
+        function_string=("0.0", "0.0", "0.0"),
+        comment=" Body forces ",
+    )
 
-    # fluid_material_constants = {
-    #     "viscosity": VISCOSITY,
-    #     "density": DENSITY,
-    #     "heat_capacity": HEAT_CAPACITY,
-    #     "thermal_diffusivity": THERMAL_DIFFUSIVITY,
-    # }
+    # Get default assembly options
+    additional_blocks.add_assembly_options(
+        block_id=10, comment=" Assembler options "
+    )
 
-    # gismo_export_options = additional_blocks.to_list()
+    fluid_material_constants = {
+        "viscosity": VISCOSITY,
+        "density": DENSITY,
+        "heat_capacity": HEAT_CAPACITY,
+        "thermal_diffusivity": THERMAL_DIFFUSIVITY,
+    }
 
-    # simulation_kernel = SimulationKernel(
-    #     pde_problem=pygadjoints.StokesTemperatureProblem,
-    #     n_threads=N_THREADS,
-    #     material_constants=fluid_material_constants,
-    #     filename=FILENAME,
-    #     gismo_export_options=gismo_export_options,
-    #     h_refinements=N_REFINEMENTS,
-    #     degree_elevations=DEGREE_ELEVATIONS,
-    #     print_summary=True,
-    #     objective_function_types=OBJECTIVE_FUNCTION,
-    # )
+    gismo_export_options = additional_blocks.to_list()
+
+    simulation_kernel = SimulationKernel(
+        pde_problem=pygadjoints.StokesTemperatureProblem,
+        n_threads=N_THREADS,
+        material_constants=fluid_material_constants,
+        filename=FILENAME,
+        gismo_export_options=gismo_export_options,
+        h_refinements=N_REFINEMENTS,
+        degree_elevations=DEGREE_ELEVATIONS,
+        print_summary=True,
+        objective_function_types=OBJECTIVE_FUNCTION,
+    )
+
+    simulation_kernel.prepare_simulation(geometry_kernel.get_multipatch())
+    simulation_kernel.initialize()
+    simulation_kernel.forward_simulation()
+    simulation_kernel.save_geometry("ParaviewOutput/3Dtest")
 
     # optimization_macro_indices = {
     #     1: 0,
