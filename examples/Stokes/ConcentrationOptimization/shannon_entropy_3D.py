@@ -48,7 +48,7 @@ OUTLET_BOUNDARY_ID = 3
 INLET_PEAK_VELOCITY = 66342.5611413043
 OBJECTIVE_FUNCTION = [1]  # 1: pressure loss, 2: deviation from
 # mean temperature
-OBJECTIVE_FUNCTION_WEIGHTS = [1]
+OBJECTIVE_FUNCTION_WEIGHTS = [1, 1216]
 
 
 class SimulationKernel:
@@ -201,6 +201,7 @@ class OptimizationKernel:
         scaling_factors_objective_function=None,
         optimization_macro_indices=None,
         write_logfiles=False,
+        include_streamline_objective=False,
     ):
         """Initialize the optimization kernel
 
@@ -222,6 +223,8 @@ class OptimizationKernel:
         self.geometry_kernel = geometry_kernel
         self.simulation_kernel = simulation_kernel
         n_objective_functions = len(simulation_kernel.objective_function_types)
+        if include_streamline_objective:
+            n_objective_functions += 1
         if scaling_factors_objective_function is None:
             self.scaling_factors_objective_function = [
                 1.0
@@ -236,16 +239,17 @@ class OptimizationKernel:
             )
         self.morph_macro_spline = optimization_macro_indices is not None
         self.write_logfiles = write_logfiles
+        self.include_streamline_objective = include_streamline_objective
 
         # Prepare initial optimization parameters
         # TODO: macro sensitivities: currently does not take x- and y-coordinates of
         # macro cps into consideration
         initial_parameter_spline_values = np.array(
-            self.geometry_kernel.parameter_spline.cps
+            self.geometry_kernel._parameter_spline.cps
         ).ravel()
         self.n_design_vars_para = len(initial_parameter_spline_values)
         if self.morph_macro_spline:
-            initial_macro_cps = self.geometry_kernel.macro_spline_initial.cps
+            initial_macro_cps = self.geometry_kernel._macro_spline_initial.cps
             optimization_macro_cp_indices = []
             optimization_macro_cp_directions = []
             initial_macro_cp_values = []
@@ -381,6 +385,17 @@ class OptimizationKernel:
         self.current_objective_values = (
             self.simulation_kernel.evaluate_objective_functions()
         )
+        # Include streamline-based objective if required
+        if self.include_streamline_objective:
+            intermediate_paraview_file = "ParaviewOutput/intermediate_results"
+            self.simulation_kernel.save_geometry(intermediate_paraview_file)
+            shannon_entropy = (
+                self.simulation_kernel.evaluate_streamline_shannon_entropy(
+                    f"{intermediate_paraview_file}_velocity.pvd"
+                )
+            )
+            self.current_objective_values += [shannon_entropy]
+
         print("----------", self.current_objective_values)
         self.current_objective_function_value = sum(
             [
@@ -582,45 +597,27 @@ if __name__ == "__main__":
         objective_function_types=OBJECTIVE_FUNCTION,
     )
 
-    simulation_kernel.prepare_simulation(geometry_kernel.get_multipatch())
-    simulation_kernel.initialize()
-    simulation_kernel.forward_simulation()
-    # simulation_kernel.save_geometry("ParaviewOutput/3Dtest")
+    optimization_macro_indices = {4: 2, 5: 2, 6: 2, 7: 2}
 
-    objective_values = simulation_kernel.evaluate_objective_functions()
-    shannon_entropy = simulation_kernel.evaluate_streamline_shannon_entropy(
-        "ParaviewOutput/3Dtest_velocity.pvd"
+    optimizer = OptimizationKernel(
+        geometry_kernel=geometry_kernel,
+        simulation_kernel=simulation_kernel,
+        optimization_method="COBYQA",
+        scaling_factors_objective_function=OBJECTIVE_FUNCTION_WEIGHTS,
+        optimization_macro_indices=optimization_macro_indices,
+        include_streamline_objective=True,
     )
-    print(objective_values, shannon_entropy)
 
-    # optimization_macro_indices = {
-    #     1: 0,
-    #     3: 1,
-    #     4: [0,1],
-    #     5: 1,
-    #     7: 0
-    # }
+    bounds = [(0.04, 0.45) for _ in range(optimizer.n_design_vars_para)]
 
-    # optimizer = OptimizationKernel(
-    #     geometry_kernel=geometry_kernel,
-    #     simulation_kernel=simulation_kernel,
-    #     optimization_method="COBYQA",
-    #     scaling_factors_objective_function=OBJECTIVE_FUNCTION_WEIGHTS,
-    #     optimization_macro_indices=optimization_macro_indices,
-    # )
+    # Set bounds for macro cp movement
+    amp_factor = 0.15
+    bounds += [
+        (BOX_LENGTH * amp_factor, BOX_LENGTH * (1 - amp_factor)),
+        (BOX_LENGTH * amp_factor, BOX_LENGTH * (1 - amp_factor)),
+        (BOX_LENGTH * amp_factor, BOX_LENGTH * (1 - amp_factor)),
+        (BOX_LENGTH * amp_factor, BOX_LENGTH * (1 - amp_factor)),
+    ]
 
-    # bounds = [(0.04, 0.49) for _ in range(optimizer.n_design_vars_para)]
-
-    # # Set bounds for macro cp movement
-    # amp_factor = 0.05
-    # bounds += [
-    #     (BOX_LENGTH * amp_factor, BOX_LENGTH * (1 - amp_factor)),
-    #     (BOX_HEIGHT*amp_factor, BOX_HEIGHT*(1-amp_factor)),
-    #     (BOX_LENGTH*amp_factor, BOX_LENGTH*(1-amp_factor)),
-    #     (BOX_HEIGHT*amp_factor, BOX_HEIGHT*(1-amp_factor)),
-    #     (BOX_HEIGHT*amp_factor, BOX_HEIGHT*(1-amp_factor)),
-    #     (BOX_LENGTH*amp_factor, BOX_LENGTH*(1-amp_factor))
-    # ]
-
-    # optimizer.optimize(bounds=bounds)
-    # optimizer.finalize()
+    optimizer.optimize(bounds=bounds)
+    optimizer.finalize()
