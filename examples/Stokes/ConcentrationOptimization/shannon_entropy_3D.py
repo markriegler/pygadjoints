@@ -6,6 +6,7 @@ a Paraview has to be generated so that postmafs can read it and analyze the stre
 import sys
 
 import numpy as np
+import postmafs as pm
 import scipy.optimize as scopt
 import splinepy as sp
 from geometry_kernel import SMXKernel
@@ -40,7 +41,7 @@ LINKAGE_THICKNESS = 0.2
 FORERUN_AFTERRUN_THICKNESS = 0.2
 # Determines the percentage of the whole forerun length to be dedicated to the linkage
 FORERUN_AFTERRUN_LINKAGE_LENGTH = 0.1
-N_REFINEMENTS = 1
+N_REFINEMENTS = 0
 DEGREE_ELEVATIONS = 0
 INLET_BOUNDARY_ID = 2
 OUTLET_BOUNDARY_ID = 3
@@ -130,6 +131,62 @@ class SimulationKernel:
 
     def evaluate_objective_functions(self):
         return self.pde.compute_objective_function_values()
+
+    def evaluate_streamline_shannon_entropy(
+        self,
+        velocity_file,
+        nx_streams=101,
+        ny_streams=101,
+        nbins_x=5,
+        nbins_y=5,
+    ):
+        field_name = "SolutionField"
+        integration_direction = "forward"
+        streamline_file = "streamlines"
+        streamline_interpolated_file = streamline_file + "_interpolated"
+        streamline_direction = "z"
+
+        # Read the velocity field
+        stream_class = pm.streamlines.Streamlines(velocity_file)
+
+        # Compute streamlines
+        stream_class.add_plane_as_streamline_source(
+            nx=nx_streams, ny=ny_streams
+        )
+        stream_class.compute_streamlines(
+            field_name=field_name,
+            integration_direction=integration_direction,
+            max_length=BOX_LENGTH * 2,
+            progress_bar=True,
+        )
+
+        # Save the streamlines
+        stream_class.save_streamlines(streamline_file)
+
+        # Analyze the streamlines
+        ana = pm.analysis.Analysis(
+            streamline_file + ".npz", streamline_direction
+        )
+        ana.set_grid_dimensions(nx=nbins_x, ny=nbins_y)
+        ana.determine_successful_streamlines(
+            cutoff_distance=BOX_LENGTH * (1 + 0.8 * FORERUN_AFTERRUN_THICKNESS)
+        )
+        ana.compute_start_and_end_grid_indices()
+
+        z_sampling = BOX_LENGTH * np.array(
+            [-FORERUN_AFTERRUN_THICKNESS, 1 + 0.8 * FORERUN_AFTERRUN_THICKNESS]
+        )
+        ana.interpolate_streamlines_and_determine_grid_index(
+            z_sampling, savefile=streamline_interpolated_file
+        )
+
+        interpolated = pm.analysis.InterpolatedValues(
+            streamline_interpolated_file + ".npz"
+        )
+        interpolated.compute_shannon_entropy_evolution(normalize_values=True)
+        entropy_value = interpolated._shannon_entropy_list[-1]
+
+        return entropy_value
 
     def save_geometry(self, filename):
         self.pde.export_paraview(filename=filename, sample_rate=32**2)
@@ -528,7 +585,13 @@ if __name__ == "__main__":
     simulation_kernel.prepare_simulation(geometry_kernel.get_multipatch())
     simulation_kernel.initialize()
     simulation_kernel.forward_simulation()
-    simulation_kernel.save_geometry("ParaviewOutput/3Dtest")
+    # simulation_kernel.save_geometry("ParaviewOutput/3Dtest")
+
+    objective_values = simulation_kernel.evaluate_objective_functions()
+    shannon_entropy = simulation_kernel.evaluate_streamline_shannon_entropy(
+        "ParaviewOutput/3Dtest_velocity.pvd"
+    )
+    print(objective_values, shannon_entropy)
 
     # optimization_macro_indices = {
     #     1: 0,
