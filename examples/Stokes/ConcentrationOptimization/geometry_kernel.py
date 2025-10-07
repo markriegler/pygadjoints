@@ -251,9 +251,7 @@ class SMXKernel:
 
         # Start with the fore and afterrun
         forerun_length = self._forerun_thickness * self._box_dimensions[2]
-        forerun_linkage_length = (
-            forerun_length * self._forerun_linkage_length
-        )
+        forerun_linkage_length = forerun_length * self._forerun_linkage_length
         forerun_z_points = np.array(
             [-forerun_length, -forerun_length / 2, -forerun_linkage_length]
         )
@@ -610,6 +608,175 @@ class SMXKernel:
                 result[1::2, :] = (array[:-1, :] + array[1:, :]) / 2
 
             return result
+
+        def interleave_2x2_grid(array):
+            """Interleave 2x2 points in x- and y-direction"""
+            y_interleaved = np.vstack(
+                (
+                    interleave_with_means(array[0::2, :]),
+                    interleave_with_means(array[1::2, :]),
+                )
+            )[[0, 3, 1, 4, 2, 5], :]
+            # Interleave in x-direction
+            interleaved = np.vstack(
+                [
+                    interleave_with_means(arr)
+                    for arr in np.split(y_interleaved, 3, axis=0)
+                ]
+            )
+            return interleaved
+
+        def create_tile_t2nt_patches(parameters, corner_points_physical):
+            """Create the t2nt (twist to non-twist) linkage patches from one tile to
+            another"""
+            # # Create patches in the parametric domain
+            # cps_quadrant_unit = _cartesian_product([np.array([0., 0.5]), np.array([0., 0.5]), np.array([0., 1.0])])
+            # offset_list = [np.tile(offset, (len(cps_quadrant_unit), 1)) for offset in cps_quadrant_unit[:4, :]]
+            # cps_quadrant_list = [cps_quadrant_unit + offset for offset in offset_list]
+
+            # # Adjust the x-component of the control points on the front (twist) side
+            # cps_quadrant_list[0][0,0] += parameters[0]
+            # cps_quadrant_list[0][2,0] += (parameters[0]+parameters[2]) / 2
+            # cps_quadrant_list[2][0,0] += (parameters[0]+parameters[2]) / 2
+            # cps_quadrant_list[2][2,0] += parameters[2]
+
+            # cps_quadrant_list[1][1,0] -= parameters[1]
+            # cps_quadrant_list[1][3,0] -= (parameters[1]+parameters[3]) / 2
+            # cps_quadrant_list[3][1,0] -= (parameters[1]+parameters[3]) / 2
+            # cps_quadrant_list[3][3,0] -= parameters[3]
+
+            # # Adjust the y-component of the control points on the back (non-twist) side
+            # cps_quadrant_list[0][4,1] += parameters[4]
+            # cps_quadrant_list[0][5,1] += (parameters[4] + parameters[5]) / 2
+            # cps_quadrant_list[1][4,1] += (parameters[4] + parameters[5]) / 2
+            # cps_quadrant_list[1][5,1] += parameters[5]
+
+            # cps_quadrant_list[2][6,1] -= parameters[6]
+            # cps_quadrant_list[2][7,1] -= (parameters[6] + parameters[7]) / 2
+            # cps_quadrant_list[3][6,1] -= (parameters[6] + parameters[7]) / 2
+            # cps_quadrant_list[3][7,1] -= parameters[7]
+
+            e = np.array([0.0, 1.0])
+            front_cps = _cartesian_product([e, e])
+            back_cps = np.copy(front_cps)
+            front_cps[[0, 2], 0] += parameters[[0, 2]]
+            front_cps[[1, 3], 0] -= parameters[[1, 3]]
+            back_cps[:2, 1] += parameters[4:6]
+            back_cps[2:, 1] -= parameters[6:]
+            front_cps = interleave_2x2_grid(front_cps)
+            back_cps = interleave_2x2_grid(back_cps)
+            # Create stencil to select the right control points for the patches
+            index_stencil = np.array([0, 1, 3, 4])
+            cps_quadrant_list = []
+            z_cps = np.repeat(e, 4).reshape(-1, 1)
+            for start_offset in index_stencil:
+                indices_relevant = start_offset + index_stencil
+                new_cps = np.hstack(
+                    (
+                        np.vstack(
+                            (
+                                front_cps[indices_relevant, :],
+                                back_cps[indices_relevant, :],
+                            )
+                        ),
+                        z_cps,
+                    )
+                )
+                cps_quadrant_list.append(new_cps)
+
+            # Linearly interpolate to physical domain
+            # Auxiliary values for the linear interpolation
+            E = _cartesian_product([e, e, e])
+            linear_interpolator = LinearNDInterpolator(
+                E, corner_points_physical
+            )
+            patches_list = [
+                sp.Bezier(
+                    degrees=[1, 1, 1], control_points=linear_interpolator(cps)
+                )
+                for cps in cps_quadrant_list
+            ]
+            return patches_list
+
+        def create_single_tile_linkage_patches(
+            parameters, corner_points_physical, is_t2nt
+        ):
+            """Create the t2nt (twist to non-twist) linkage patches from one tile to
+            another"""
+            e = np.array([0.0, 1.0])
+            front_cps = _cartesian_product([e, e])
+            back_cps = np.copy(front_cps)
+            if is_t2nt:
+                front_cps[[0, 2], 0] += parameters[[0, 2]]
+                front_cps[[1, 3], 0] -= parameters[[1, 3]]
+                back_cps[:2, 1] += parameters[4:6]
+                back_cps[2:, 1] -= parameters[6:]
+            else:
+                front_cps[:2, 1] += parameters[:2]
+                front_cps[2:4, 1] -= parameters[2:4]
+                back_cps[[0, 2], 0] += parameters[[4, 6]]
+                back_cps[[1, 3], 0] -= parameters[[5, 7]]
+            front_cps = interleave_2x2_grid(front_cps)
+            back_cps = interleave_2x2_grid(back_cps)
+            # Create stencil to select the right control points for the patches
+            index_stencil = np.array([0, 1, 3, 4])
+            cps_quadrant_list = []
+            z_cps = np.repeat(e, 4).reshape(-1, 1)
+            for start_offset in index_stencil:
+                indices_relevant = start_offset + index_stencil
+                new_cps = np.hstack(
+                    (
+                        np.vstack(
+                            (
+                                front_cps[indices_relevant, :],
+                                back_cps[indices_relevant, :],
+                            )
+                        ),
+                        z_cps,
+                    )
+                )
+                cps_quadrant_list.append(new_cps)
+
+            # Linearly interpolate to physical domain
+            # Auxiliary values for the linear interpolation
+            E = _cartesian_product([e, e, e])
+            linear_interpolator = LinearNDInterpolator(
+                E, corner_points_physical
+            )
+            patches_list = [
+                sp.Bezier(
+                    degrees=[1, 1, 1], control_points=linear_interpolator(cps)
+                )
+                for cps in cps_quadrant_list
+            ]
+            return patches_list
+
+        # Dummy function calls
+        create_tile_t2nt_patches(
+            parameters=np.array(
+                [0.02, 0.3, 0.15, 0.45, 0.14, 0.24, 0.04, 0.44]
+            ),
+            corner_points_physical=_cartesian_product(
+                [
+                    np.array([0.0, 1.0]),
+                    np.array([0.0, 1.0]),
+                    np.array([0.0, 0.3]),
+                ]
+            ),
+        )
+        create_single_tile_linkage_patches(
+            parameters=np.array(
+                [0.02, 0.3, 0.15, 0.45, 0.14, 0.24, 0.04, 0.44]
+            ),
+            corner_points_physical=_cartesian_product(
+                [
+                    np.array([0.0, 1.0]),
+                    np.array([0.0, 1.0]),
+                    np.array([0.0, 0.3]),
+                ]
+            ),
+            is_t2nt=False,
+        )
 
         def compute_x_linkage_points(x_points, parameters):
             """
